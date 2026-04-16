@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -148,4 +149,61 @@ func (h *Handler) ListRepositories(w http.ResponseWriter, r *http.Request) {
 		resp = append(resp, repositoryToResponse(repo))
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// CreateRepository registers a new repository in the workspace.
+// Route: POST /workspaces/:wsId/repositories
+func (h *Handler) CreateRepository(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "missing workspace id")
+		return
+	}
+
+	var req CreateRepositoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	urlStr, err := validateRepositoryURL(req.URL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	name, err := validateRepositoryName(req.Name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	platform, err := validatePlatform(req.Platform)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	defaultBranch := strings.TrimSpace(req.DefaultBranch)
+	if defaultBranch == "" {
+		defaultBranch = "main"
+	}
+
+	repo, err := h.Queries.CreateRepository(r.Context(), db.CreateRepositoryParams{
+		WorkspaceID:   parseUUID(workspaceID),
+		Url:           urlStr,
+		Name:          name,
+		DefaultBranch: defaultBranch,
+		Description:   strings.TrimSpace(req.Description),
+		Platform:      platform,
+	})
+	if err != nil {
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "repository with this url already exists")
+			return
+		}
+		slog.Error("create repository", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create repository")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, repositoryToResponse(repo))
 }

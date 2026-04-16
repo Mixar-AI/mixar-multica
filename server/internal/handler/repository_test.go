@@ -72,3 +72,113 @@ func TestListRepositories_Empty(t *testing.T) {
 		t.Errorf("expected empty list, got %d", len(got))
 	}
 }
+
+func TestCreateRepository_HappyPath(t *testing.T) {
+	wsID := setupTestWorkspace(t)
+
+	body := map[string]any{
+		"url":            "https://github.com/multica-ai/multica.git",
+		"name":           "multica",
+		"default_branch": "main",
+		"description":    "Multica repo",
+	}
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces/"+wsID+"/repositories", body)
+	withWorkspace(req, wsID)
+	testHandler.CreateRepository(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want 201; body=%s", w.Code, w.Body.String())
+	}
+	var got RepositoryResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// URL normalization strips .git; expect normalized form.
+	if got.URL != "https://github.com/multica-ai/multica" {
+		t.Errorf("URL: got %q, want normalized form without .git", got.URL)
+	}
+	if got.Name != "multica" {
+		t.Errorf("Name: got %q", got.Name)
+	}
+	if got.DefaultBranch != "main" {
+		t.Errorf("DefaultBranch: got %q", got.DefaultBranch)
+	}
+	if got.Platform != "github" {
+		t.Errorf("Platform default: got %q", got.Platform)
+	}
+}
+
+func TestCreateRepository_DuplicateURL(t *testing.T) {
+	wsID := setupTestWorkspace(t)
+	createRepoForTest(t, wsID, "https://github.com/foo/bar.git", "bar")
+
+	body := map[string]any{
+		"url":  "https://github.com/foo/bar.git",
+		"name": "bar2",
+	}
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces/"+wsID+"/repositories", body)
+	withWorkspace(req, wsID)
+	testHandler.CreateRepository(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status: got %d, want 409; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateRepository_DuplicateURL_NormalizedEquivalent(t *testing.T) {
+	wsID := setupTestWorkspace(t)
+	// Create with .git suffix — stored as normalized (without .git)
+	createRepoForTest(t, wsID, "https://github.com/foo/bar.git/", "bar")
+
+	// Attempt to create again without .git — should normalize to same URL → 409
+	body := map[string]any{
+		"url":  "https://github.com/foo/bar",
+		"name": "bar-nodotgit",
+	}
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces/"+wsID+"/repositories", body)
+	withWorkspace(req, wsID)
+	testHandler.CreateRepository(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status: got %d, want 409 (normalized duplicate); body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateRepository_InvalidURL(t *testing.T) {
+	wsID := setupTestWorkspace(t)
+
+	body := map[string]any{
+		"url":  "not-a-url",
+		"name": "thing",
+	}
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces/"+wsID+"/repositories", body)
+	withWorkspace(req, wsID)
+	testHandler.CreateRepository(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400", w.Code)
+	}
+}
+
+// createRepoForTest is a test-only helper used by tests that need a pre-existing
+// repository in the workspace.
+func createRepoForTest(t *testing.T, wsID, url, name string) RepositoryResponse {
+	t.Helper()
+	body := map[string]any{"url": url, "name": name}
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces/"+wsID+"/repositories", body)
+	withWorkspace(req, wsID)
+	testHandler.CreateRepository(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("createRepoForTest: status %d, body=%s", w.Code, w.Body.String())
+	}
+	var got RepositoryResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("createRepoForTest unmarshal: %v", err)
+	}
+	return got
+}
