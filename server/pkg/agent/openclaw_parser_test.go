@@ -101,3 +101,83 @@ func TestOpenclawParserTextDeltaStreams(t *testing.T) {
 		t.Errorf("msg[1] = %+v, want text \"world\"", msgs[1])
 	}
 }
+
+func TestOpenclawParserToolUseBuffersInputAcrossDeltas(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{
+		`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call_abc","name":"bash"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"comm"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"and\":\"ls -la\"}"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":1}}`,
+	}
+	input := strings.Join(lines, "\n") + "\n"
+
+	ch := make(chan Message, 16)
+	processOpenclawOutput(strings.NewReader(input), ch, slog.Default())
+	close(ch)
+
+	msgs := drainMessages(ch)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 tool_use message, got %d (%+v)", len(msgs), msgs)
+	}
+	m := msgs[0]
+	if m.Type != MessageToolUse {
+		t.Errorf("type = %s, want %s", m.Type, MessageToolUse)
+	}
+	if m.Tool != "bash" {
+		t.Errorf("tool = %q, want %q", m.Tool, "bash")
+	}
+	if m.CallID != "call_abc" {
+		t.Errorf("callID = %q, want %q", m.CallID, "call_abc")
+	}
+	if m.Input["command"] != "ls -la" {
+		t.Errorf("input.command = %v, want %q", m.Input["command"], "ls -la")
+	}
+}
+
+func TestOpenclawParserToolUseWithMalformedInputUsesRaw(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{
+		`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"c1","name":"weird"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"not json at all"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":0}}`,
+	}
+	input := strings.Join(lines, "\n") + "\n"
+
+	ch := make(chan Message, 16)
+	processOpenclawOutput(strings.NewReader(input), ch, slog.Default())
+	close(ch)
+
+	msgs := drainMessages(ch)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if msgs[0].Input["_raw"] != "not json at all" {
+		t.Errorf("expected _raw fallback, got %+v", msgs[0].Input)
+	}
+}
+
+func TestOpenclawParserToolUseStripsMCPPrefix(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{
+		`{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"call_x","name":"mcp__multica-coordination__create_issue"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"title\":\"Bug\"}"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":2}}`,
+	}
+	input := strings.Join(lines, "\n") + "\n"
+
+	ch := make(chan Message, 16)
+	processOpenclawOutput(strings.NewReader(input), ch, slog.Default())
+	close(ch)
+
+	msgs := drainMessages(ch)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 tool_use message, got %d", len(msgs))
+	}
+	if msgs[0].Tool != "create_issue" {
+		t.Errorf("tool = %q, want %q (MCP prefix should be stripped)", msgs[0].Tool, "create_issue")
+	}
+}
