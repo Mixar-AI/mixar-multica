@@ -2,12 +2,14 @@ package handler
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // RepositoryResponse is the JSON shape returned by repository endpoints.
@@ -108,4 +110,42 @@ func parseUUIDParam(r *http.Request, key string) (pgtype.UUID, bool) {
 		return pgtype.UUID{}, false
 	}
 	return u, true
+}
+
+// repositoryToResponse converts a db.Repository to a RepositoryResponse.
+func repositoryToResponse(r db.Repository) RepositoryResponse {
+	return RepositoryResponse{
+		ID:            uuidToString(r.ID),
+		WorkspaceID:   uuidToString(r.WorkspaceID),
+		URL:           r.Url,
+		Name:          r.Name,
+		DefaultBranch: r.DefaultBranch,
+		Description:   r.Description,
+		Platform:      r.Platform,
+		CreatedAt:     timestampToString(r.CreatedAt),
+		UpdatedAt:     timestampToString(r.UpdatedAt),
+	}
+}
+
+// ListRepositories returns repositories registered in the workspace.
+// Route: GET /workspaces/:wsId/repositories
+func (h *Handler) ListRepositories(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "missing workspace id")
+		return
+	}
+
+	repos, err := h.Queries.ListRepositoriesByWorkspace(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		slog.Error("list repositories", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list repositories")
+		return
+	}
+
+	resp := make([]RepositoryResponse, 0, len(repos))
+	for _, repo := range repos {
+		resp = append(resp, repositoryToResponse(repo))
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
