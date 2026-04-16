@@ -282,3 +282,21 @@ func (h *Handler) UpdateRepository(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, repositoryToResponse(repo))
 }
+
+// DeleteRepository removes a repository (cascades to worktrees and pull_requests).
+// Route: DELETE /workspaces/:wsId/repositories/:id
+func (h *Handler) DeleteRepository(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseUUIDParam(r, "id")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	if err := h.Queries.DeleteRepository(r.Context(), id); err != nil {
+		slog.Error("delete repository", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete repository")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

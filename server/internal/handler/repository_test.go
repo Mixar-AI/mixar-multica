@@ -260,3 +260,28 @@ func TestUpdateRepository_NotFound(t *testing.T) {
 		t.Fatalf("status: got %d, want 404", w.Code)
 	}
 }
+
+func TestDeleteRepository_HappyPath(t *testing.T) {
+	wsID := setupTestWorkspace(t)
+	created := createRepoForTest(t, wsID, "https://github.com/test/repo.git", "test")
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+wsID+"/repositories/"+created.ID, nil)
+	withWorkspace(req, wsID)
+	req = withURLParam(req, "id", created.ID)
+	testHandler.DeleteRepository(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d, want 204; body=%s", w.Code, w.Body.String())
+	}
+
+	// Verify it's gone
+	w2 := httptest.NewRecorder()
+	req2 := newRequest("GET", "/api/workspaces/"+wsID+"/repositories/"+created.ID, nil)
+	withWorkspace(req2, wsID)
+	req2 = withURLParam(req2, "id", created.ID)
+	testHandler.GetRepository(w2, req2)
+	if w2.Code != http.StatusNotFound {
+		t.Errorf("after delete, GET should 404; got %d", w2.Code)
+	}
+}
