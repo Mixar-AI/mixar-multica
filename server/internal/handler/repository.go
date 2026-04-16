@@ -209,16 +209,26 @@ func (h *Handler) CreateRepository(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, repositoryToResponse(repo))
 }
 
-// GetRepository returns a single repository by ID.
+// GetRepository returns a single repository by ID, scoped to the workspace.
 // Route: GET /workspaces/:wsId/repositories/:id
 func (h *Handler) GetRepository(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "missing workspace id")
+		return
+	}
+	wsUUID := parseUUID(workspaceID)
+
 	id, ok := parseUUIDParam(r, "id")
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 
-	repo, err := h.Queries.GetRepository(r.Context(), id)
+	repo, err := h.Queries.GetRepositoryInWorkspace(r.Context(), db.GetRepositoryInWorkspaceParams{
+		ID:          id,
+		WorkspaceID: wsUUID,
+	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "repository not found")
@@ -232,10 +242,17 @@ func (h *Handler) GetRepository(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, repositoryToResponse(repo))
 }
 
-// UpdateRepository updates name / description / default_branch.
+// UpdateRepository updates name / description / default_branch, scoped to the workspace.
 // URL and platform are immutable per the spec.
 // Route: PATCH /workspaces/:wsId/repositories/:id
 func (h *Handler) UpdateRepository(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "missing workspace id")
+		return
+	}
+	wsUUID := parseUUID(workspaceID)
+
 	id, ok := parseUUIDParam(r, "id")
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -248,7 +265,7 @@ func (h *Handler) UpdateRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	params := db.UpdateRepositoryParams{ID: id}
+	params := db.UpdateRepositoryInWorkspaceParams{ID: id, WorkspaceID: wsUUID}
 	if req.Name != nil {
 		name, err := validateRepositoryName(*req.Name)
 		if err != nil {
@@ -269,7 +286,7 @@ func (h *Handler) UpdateRepository(w http.ResponseWriter, r *http.Request) {
 		params.DefaultBranch = pgtype.Text{String: branch, Valid: true}
 	}
 
-	repo, err := h.Queries.UpdateRepository(r.Context(), params)
+	repo, err := h.Queries.UpdateRepositoryInWorkspace(r.Context(), params)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "repository not found")
@@ -283,18 +300,33 @@ func (h *Handler) UpdateRepository(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, repositoryToResponse(repo))
 }
 
-// DeleteRepository removes a repository (cascades to worktrees and pull_requests).
+// DeleteRepository removes a repository (cascades to worktrees and pull_requests), scoped to the workspace.
 // Route: DELETE /workspaces/:wsId/repositories/:id
 func (h *Handler) DeleteRepository(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "missing workspace id")
+		return
+	}
+	wsUUID := parseUUID(workspaceID)
+
 	id, ok := parseUUIDParam(r, "id")
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 
-	if err := h.Queries.DeleteRepository(r.Context(), id); err != nil {
+	rows, err := h.Queries.DeleteRepositoryInWorkspace(r.Context(), db.DeleteRepositoryInWorkspaceParams{
+		ID:          id,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
 		slog.Error("delete repository", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete repository")
+		return
+	}
+	if rows == 0 {
+		writeError(w, http.StatusNotFound, "repository not found")
 		return
 	}
 

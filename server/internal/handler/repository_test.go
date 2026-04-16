@@ -6,15 +6,21 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
+
+// wsSeq is a package-level counter that makes each setupTestWorkspace call
+// produce a unique slug, even when called multiple times within one test.
+var wsSeq atomic.Int32
 
 // setupTestWorkspace creates a fresh isolated workspace for a single test and
 // cleans it up on t.Cleanup. Returns the workspace UUID string.
 func setupTestWorkspace(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
-	slug := fmt.Sprintf("repo-test-%s", t.Name())
+	seq := wsSeq.Add(1)
+	slug := fmt.Sprintf("repo-test-%d-%s", seq, t.Name())
 	// Sanitize slug: test names may contain slashes.
 	for i := 0; i < len(slug); i++ {
 		if slug[i] == '/' || slug[i] == ' ' {
@@ -283,5 +289,62 @@ func TestDeleteRepository_HappyPath(t *testing.T) {
 	testHandler.GetRepository(w2, req2)
 	if w2.Code != http.StatusNotFound {
 		t.Errorf("after delete, GET should 404; got %d", w2.Code)
+	}
+}
+
+func TestGetRepository_CrossWorkspaceAccessBlocked(t *testing.T) {
+	wsA := setupTestWorkspace(t)
+	wsB := setupTestWorkspace(t)
+	repoInB := createRepoForTest(t, wsB, "https://github.com/test/cross.git", "cross")
+
+	// Attempt to GET wsB's repo via wsA's URL path
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/workspaces/"+wsA+"/repositories/"+repoInB.ID, nil)
+	withWorkspace(req, wsA)
+	req = withURLParam(req, "id", repoInB.ID)
+	testHandler.GetRepository(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace access should 404; got %d (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestDeleteRepository_CrossWorkspaceAccessBlocked(t *testing.T) {
+	wsA := setupTestWorkspace(t)
+	wsB := setupTestWorkspace(t)
+	repoInB := createRepoForTest(t, wsB, "https://github.com/test/cross2.git", "cross2")
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+wsA+"/repositories/"+repoInB.ID, nil)
+	withWorkspace(req, wsA)
+	req = withURLParam(req, "id", repoInB.ID)
+	testHandler.DeleteRepository(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace delete should 404; got %d", w.Code)
+	}
+
+	// Verify the repo in wsB still exists
+	w2 := httptest.NewRecorder()
+	req2 := newRequest("GET", "/api/workspaces/"+wsB+"/repositories/"+repoInB.ID, nil)
+	withWorkspace(req2, wsB)
+	req2 = withURLParam(req2, "id", repoInB.ID)
+	testHandler.GetRepository(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Errorf("repo in wsB should still exist; got %d", w2.Code)
+	}
+}
+
+func TestDeleteRepository_ReturnsNotFoundForMissingRepo(t *testing.T) {
+	wsID := setupTestWorkspace(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+wsID+"/repositories/00000000-0000-0000-0000-000000000000", nil)
+	withWorkspace(req, wsID)
+	req = withURLParam(req, "id", "00000000-0000-0000-0000-000000000000")
+	testHandler.DeleteRepository(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("nonexistent delete should 404; got %d", w.Code)
 	}
 }

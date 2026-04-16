@@ -50,22 +50,35 @@ func (q *Queries) CreateRepository(ctx context.Context, arg CreateRepositoryPara
 	return i, err
 }
 
-const deleteRepository = `-- name: DeleteRepository :exec
-DELETE FROM repository WHERE id = $1
+const deleteRepositoryInWorkspace = `-- name: DeleteRepositoryInWorkspace :execrows
+DELETE FROM repository WHERE id = $1 AND workspace_id = $2
 `
 
-func (q *Queries) DeleteRepository(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteRepository, id)
-	return err
+type DeleteRepositoryInWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-const getRepository = `-- name: GetRepository :one
+func (q *Queries) DeleteRepositoryInWorkspace(ctx context.Context, arg DeleteRepositoryInWorkspaceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRepositoryInWorkspace, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getRepositoryByURL = `-- name: GetRepositoryByURL :one
 SELECT id, workspace_id, url, name, default_branch, description, platform, created_at, updated_at FROM repository
-WHERE id = $1
+WHERE workspace_id = $1 AND url = $2
 `
 
-func (q *Queries) GetRepository(ctx context.Context, id pgtype.UUID) (Repository, error) {
-	row := q.db.QueryRow(ctx, getRepository, id)
+type GetRepositoryByURLParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Url         string      `json:"url"`
+}
+
+func (q *Queries) GetRepositoryByURL(ctx context.Context, arg GetRepositoryByURLParams) (Repository, error) {
+	row := q.db.QueryRow(ctx, getRepositoryByURL, arg.WorkspaceID, arg.Url)
 	var i Repository
 	err := row.Scan(
 		&i.ID,
@@ -81,18 +94,18 @@ func (q *Queries) GetRepository(ctx context.Context, id pgtype.UUID) (Repository
 	return i, err
 }
 
-const getRepositoryByURL = `-- name: GetRepositoryByURL :one
+const getRepositoryInWorkspace = `-- name: GetRepositoryInWorkspace :one
 SELECT id, workspace_id, url, name, default_branch, description, platform, created_at, updated_at FROM repository
-WHERE workspace_id = $1 AND url = $2
+WHERE id = $1 AND workspace_id = $2
 `
 
-type GetRepositoryByURLParams struct {
+type GetRepositoryInWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Url         string      `json:"url"`
 }
 
-func (q *Queries) GetRepositoryByURL(ctx context.Context, arg GetRepositoryByURLParams) (Repository, error) {
-	row := q.db.QueryRow(ctx, getRepositoryByURL, arg.WorkspaceID, arg.Url)
+func (q *Queries) GetRepositoryInWorkspace(ctx context.Context, arg GetRepositoryInWorkspaceParams) (Repository, error) {
+	row := q.db.QueryRow(ctx, getRepositoryInWorkspace, arg.ID, arg.WorkspaceID)
 	var i Repository
 	err := row.Scan(
 		&i.ID,
@@ -144,26 +157,28 @@ func (q *Queries) ListRepositoriesByWorkspace(ctx context.Context, workspaceID p
 	return items, nil
 }
 
-const updateRepository = `-- name: UpdateRepository :one
+const updateRepositoryInWorkspace = `-- name: UpdateRepositoryInWorkspace :one
 UPDATE repository SET
-    name           = COALESCE($2, name),
-    description    = COALESCE($3, description),
-    default_branch = COALESCE($4, default_branch),
+    name           = COALESCE($3, name),
+    description    = COALESCE($4, description),
+    default_branch = COALESCE($5, default_branch),
     updated_at     = NOW()
-WHERE id = $1
+WHERE id = $1 AND workspace_id = $2
 RETURNING id, workspace_id, url, name, default_branch, description, platform, created_at, updated_at
 `
 
-type UpdateRepositoryParams struct {
+type UpdateRepositoryInWorkspaceParams struct {
 	ID            pgtype.UUID `json:"id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
 	Name          pgtype.Text `json:"name"`
 	Description   pgtype.Text `json:"description"`
 	DefaultBranch pgtype.Text `json:"default_branch"`
 }
 
-func (q *Queries) UpdateRepository(ctx context.Context, arg UpdateRepositoryParams) (Repository, error) {
-	row := q.db.QueryRow(ctx, updateRepository,
+func (q *Queries) UpdateRepositoryInWorkspace(ctx context.Context, arg UpdateRepositoryInWorkspaceParams) (Repository, error) {
+	row := q.db.QueryRow(ctx, updateRepositoryInWorkspace,
 		arg.ID,
+		arg.WorkspaceID,
 		arg.Name,
 		arg.Description,
 		arg.DefaultBranch,
