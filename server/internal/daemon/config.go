@@ -34,6 +34,7 @@ type Config struct {
 	LaunchedBy         string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile            string                // profile name (empty = default)
 	Agents             map[string]AgentEntry // keyed by provider: claude, codex, opencode, openclaw, hermes, gemini, pi
+	OpenclawConfigPath string                // absolute path to Multica-managed openclaw.json; empty if write failed or openclaw not detected
 	WorkspacesRoot     string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask   bool                  // preserve env after task for debugging
 	HealthPort         int                   // local HTTP port for health checks (default: 19514)
