@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -139,6 +140,30 @@ func TestEnsureConfigPreservesUnrelatedKeys(t *testing.T) {
 	telemetry := nestedMap(t, got, "telemetry")
 	if telemetry["enabled"] != false {
 		t.Errorf("user telemetry section lost: got %v", telemetry)
+	}
+}
+
+func TestEnsureConfigErrorOnReadOnlyDir(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("running as root — chmod-based permission denial doesn't apply")
+	}
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() {
+		// Restore so t.TempDir cleanup can remove it.
+		_ = os.Chmod(dir, 0o700)
+	})
+
+	_, err := EnsureConfig(dir)
+	if err == nil {
+		t.Fatal("expected error on read-only dir, got nil")
+	}
+	if !strings.Contains(err.Error(), "openclaw") {
+		t.Errorf("error should mention openclaw context, got: %v", err)
 	}
 }
 
