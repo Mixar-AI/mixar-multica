@@ -70,3 +70,34 @@ func drainMessages(ch <-chan Message) []Message {
 	}
 	return msgs
 }
+
+func TestOpenclawParserTextDeltaStreams(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{
+		`{"type":"init","session_id":"s1"}`,
+		`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello "}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"world"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":0}}`,
+	}
+	input := strings.Join(lines, "\n") + "\n"
+
+	ch := make(chan Message, 16)
+	state := processOpenclawOutput(strings.NewReader(input), ch, slog.Default())
+	close(ch)
+
+	if state.output.String() != "Hello world" {
+		t.Errorf("accumulated output = %q, want %q", state.output.String(), "Hello world")
+	}
+	msgs := drainMessages(ch)
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 text messages, got %d", len(msgs))
+	}
+	if msgs[0].Type != MessageText || msgs[0].Content != "Hello " {
+		t.Errorf("msg[0] = %+v, want text \"Hello \"", msgs[0])
+	}
+	if msgs[1].Type != MessageText || msgs[1].Content != "world" {
+		t.Errorf("msg[1] = %+v, want text \"world\"", msgs[1])
+	}
+}

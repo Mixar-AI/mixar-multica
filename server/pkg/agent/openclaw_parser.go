@@ -197,9 +197,89 @@ func (s *openclawResultState) handleStreamEvent(env openclawEnvelope, ch chan<- 
 		return
 	}
 	switch ev.Type {
-	// content_block_start, content_block_delta, content_block_stop, message_delta
-	// implemented in subsequent tasks.
+	case "content_block_start":
+		s.handleContentBlockStart(ev)
+	case "content_block_delta":
+		s.handleContentBlockDelta(ev, ch)
+	case "content_block_stop":
+		s.handleContentBlockStop(ev, ch)
+	case "message_delta":
+		s.addUsage(ev.Usage)
+		if ev.Delta != nil {
+			s.addUsage(ev.Delta.Usage)
+		}
+	case "message_stop":
+		// terminal marker for an assistant message; nothing to emit.
 	default:
 		logger.Debug("openclaw: unknown stream_event type", "type", ev.Type)
 	}
+}
+
+// handleContentBlockStart records open-block bookkeeping for tool_use and
+// thinking blocks. text blocks are emitted directly by the delta handler
+// and don't need state.
+func (s *openclawResultState) handleContentBlockStart(ev openclawStreamEvent) {
+	if ev.ContentBlock == nil {
+		return
+	}
+	switch ev.ContentBlock.Type {
+	case "tool_use":
+		s.openBlocks[ev.Index] = &openclawOpenBlock{
+			kind:   "tool_use",
+			tool:   ev.ContentBlock.Name,
+			callID: ev.ContentBlock.ID,
+		}
+	case "thinking":
+		s.openBlocks[ev.Index] = &openclawOpenBlock{kind: "thinking"}
+	}
+}
+
+// handleContentBlockDelta routes per-block deltas to the right sink.
+func (s *openclawResultState) handleContentBlockDelta(ev openclawStreamEvent, ch chan<- Message) {
+	if ev.Delta == nil {
+		return
+	}
+	switch ev.Delta.Type {
+	case "text_delta":
+		if ev.Delta.Text != "" {
+			s.output.WriteString(ev.Delta.Text)
+			trySend(ch, Message{Type: MessageText, Content: ev.Delta.Text})
+		}
+	case "input_json_delta":
+		blk, ok := s.openBlocks[ev.Index]
+		if !ok || blk.kind != "tool_use" {
+			return
+		}
+		blk.inputBuf.WriteString(ev.Delta.PartialJSON)
+	case "thinking_delta":
+		if ev.Delta.Thinking != "" {
+			trySend(ch, Message{Type: MessageThinking, Content: ev.Delta.Thinking})
+		}
+	}
+}
+
+// handleContentBlockStop flushes a buffered tool_use input as MessageToolUse.
+// Other block types have already emitted everything via deltas.
+func (s *openclawResultState) handleContentBlockStop(ev openclawStreamEvent, ch chan<- Message) {
+	blk, ok := s.openBlocks[ev.Index]
+	if !ok {
+		return
+	}
+	defer delete(s.openBlocks, ev.Index)
+	if blk.kind != "tool_use" {
+		return
+	}
+	input := map[string]any{}
+	if buf := blk.inputBuf.String(); buf != "" {
+		if err := json.Unmarshal([]byte(buf), &input); err != nil {
+			// Surface the call anyway so the user sees something happened.
+			input = map[string]any{"_raw": buf}
+		}
+	}
+	trySend(ch, Message{
+		Type:   MessageToolUse,
+		Tool:   normalizeMCPToolName(blk.tool),
+		CallID: blk.callID,
+		Input:  input,
+	})
 }
