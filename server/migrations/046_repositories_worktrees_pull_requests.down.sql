@@ -1,0 +1,5 @@
+ALTER TABLE workspace ADD COLUMN repos JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+DROP TABLE IF EXISTS pull_request;
+DROP TABLE IF EXISTS worktree;
+DROP TABLE IF EXISTS repository;
