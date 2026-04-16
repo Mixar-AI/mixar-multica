@@ -68,7 +68,7 @@ is_local() {
 
 if is_local; then
   # ---------- Local: use Docker ----------
-  echo "==> Ensuring shared PostgreSQL container is running on localhost:5432..."
+  echo "==> Ensuring shared PostgreSQL container is running on localhost:${db_port}..."
   docker compose up -d postgres
 
   echo "==> Waiting for PostgreSQL to be ready..."
