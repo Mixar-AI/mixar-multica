@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -40,4 +42,31 @@ func TestNormalizeMCPToolNameStripsPrefix(t *testing.T) {
 			t.Errorf("normalizeMCPToolName(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
+}
+
+func TestOpenclawParserInitCapturesSessionID(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan Message, 16)
+	input := `{"type":"init","session_id":"sess_abc123"}` + "\n"
+
+	state := processOpenclawOutput(strings.NewReader(input), ch, slog.Default())
+
+	if state.sessionID != "sess_abc123" {
+		t.Errorf("sessionID = %q, want %q", state.sessionID, "sess_abc123")
+	}
+	close(ch)
+	if msgs := drainMessages(ch); len(msgs) != 0 {
+		t.Errorf("expected 0 messages from init alone, got %d", len(msgs))
+	}
+}
+
+// drainMessages collects all remaining messages from a closed channel.
+// Test-only helper used by openclaw_parser_test.go cases.
+func drainMessages(ch <-chan Message) []Message {
+	var msgs []Message
+	for m := range ch {
+		msgs = append(msgs, m)
+	}
+	return msgs
 }
