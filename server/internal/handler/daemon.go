@@ -484,7 +484,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Include workspace ID so the daemon can associate the task with a workspace.
-	// Repos are now sourced from the repository table (sub-project B wires this).
+	// Repos are now sourced from the repository table (Plan Task 17 wires this).
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
@@ -513,7 +513,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Chat task: populate workspace/session info from the chat_session table.
-	// Repos are now sourced from the repository table (sub-project B wires this).
+	// Repos are now sourced from the repository table (Plan Task 17 wires this).
 	if task.ChatSessionID.Valid {
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
