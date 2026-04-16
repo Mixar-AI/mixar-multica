@@ -231,3 +231,54 @@ func (h *Handler) GetRepository(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, repositoryToResponse(repo))
 }
+
+// UpdateRepository updates name / description / default_branch.
+// URL and platform are immutable per the spec.
+// Route: PATCH /workspaces/:wsId/repositories/:id
+func (h *Handler) UpdateRepository(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseUUIDParam(r, "id")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var req UpdateRepositoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	params := db.UpdateRepositoryParams{ID: id}
+	if req.Name != nil {
+		name, err := validateRepositoryName(*req.Name)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.Name = pgtype.Text{String: name, Valid: true}
+	}
+	if req.Description != nil {
+		params.Description = pgtype.Text{String: strings.TrimSpace(*req.Description), Valid: true}
+	}
+	if req.DefaultBranch != nil {
+		branch := strings.TrimSpace(*req.DefaultBranch)
+		if branch == "" {
+			writeError(w, http.StatusBadRequest, "default_branch cannot be empty")
+			return
+		}
+		params.DefaultBranch = pgtype.Text{String: branch, Valid: true}
+	}
+
+	repo, err := h.Queries.UpdateRepository(r.Context(), params)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "repository not found")
+			return
+		}
+		slog.Error("update repository", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to update repository")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, repositoryToResponse(repo))
+}

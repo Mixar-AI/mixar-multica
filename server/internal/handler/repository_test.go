@@ -218,3 +218,45 @@ func TestGetRepository_NotFound(t *testing.T) {
 		t.Fatalf("status: got %d, want 404", w.Code)
 	}
 }
+
+func TestUpdateRepository_HappyPath(t *testing.T) {
+	wsID := setupTestWorkspace(t)
+	created := createRepoForTest(t, wsID, "https://github.com/test/repo.git", "test")
+
+	newName := "test-renamed"
+	body := map[string]any{"name": newName}
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+wsID+"/repositories/"+created.ID, body)
+	withWorkspace(req, wsID)
+	req = withURLParam(req, "id", created.ID)
+	testHandler.UpdateRepository(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var got RepositoryResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Name != newName {
+		t.Errorf("Name: got %q, want %q", got.Name, newName)
+	}
+	// URL should be unchanged (normalized form, without .git)
+	if got.URL != "https://github.com/test/repo" {
+		t.Errorf("URL changed unexpectedly: got %q", got.URL)
+	}
+}
+
+func TestUpdateRepository_NotFound(t *testing.T) {
+	wsID := setupTestWorkspace(t)
+	body := map[string]any{"name": "x"}
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+wsID+"/repositories/00000000-0000-0000-0000-000000000000", body)
+	withWorkspace(req, wsID)
+	req = withURLParam(req, "id", "00000000-0000-0000-0000-000000000000")
+	testHandler.UpdateRepository(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d, want 404", w.Code)
+	}
+}
