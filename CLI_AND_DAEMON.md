@@ -193,6 +193,29 @@ Agent-specific overrides:
 | `MULTICA_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
 | `MULTICA_CURSOR_MODEL` | Override the Cursor Agent model used |
 
+### OpenClaw Live Streaming
+
+The daemon writes a Multica-managed `openclaw.json` to
+`~/.multica/profiles/<profile>/openclaw/openclaw.json` on first
+detection of the `openclaw` binary, and sets `OPENCLAW_CONFIG_PATH`
+when spawning agent tasks. This config defines a `multica-claude`
+cliBackend with `output: "jsonl"` and `jsonlDialect: "claude-stream-json"`,
+which is what enables OpenClaw to emit live progress events (text
+deltas, tool calls, thinking) instead of returning only a final result.
+
+Requirements:
+
+- `claude` on PATH — the `multica-claude` backend wraps the Claude CLI.
+- Your own `~/.openclaw/openclaw.json` is never read or modified.
+
+By default, the daemon resolves models as `multica-claude/sonnet`.
+Override via `MULTICA_OPENCLAW_MODEL`:
+
+- A bare model name (`opus`) is prefixed with the default backend
+  (`multica-claude/opus`).
+- A fully-qualified `<backend>/<model>` string (`claude-cli/4`) is
+  passed through as-is.
+
 ### Self-Hosted Server
 
 When connecting to a self-hosted Multica instance, the easiest approach is:
