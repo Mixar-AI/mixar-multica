@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -206,4 +207,27 @@ func (h *Handler) CreateRepository(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, repositoryToResponse(repo))
+}
+
+// GetRepository returns a single repository by ID.
+// Route: GET /workspaces/:wsId/repositories/:id
+func (h *Handler) GetRepository(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseUUIDParam(r, "id")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	repo, err := h.Queries.GetRepository(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "repository not found")
+			return
+		}
+		slog.Error("get repository", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get repository")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, repositoryToResponse(repo))
 }

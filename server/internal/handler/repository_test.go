@@ -182,3 +182,39 @@ func createRepoForTest(t *testing.T, wsID, url, name string) RepositoryResponse 
 	}
 	return got
 }
+
+func TestGetRepository_HappyPath(t *testing.T) {
+	wsID := setupTestWorkspace(t)
+	created := createRepoForTest(t, wsID, "https://github.com/test/repo.git", "test")
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/workspaces/"+wsID+"/repositories/"+created.ID, nil)
+	withWorkspace(req, wsID)
+	req = withURLParam(req, "id", created.ID)
+	testHandler.GetRepository(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var got RepositoryResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.ID != created.ID {
+		t.Errorf("ID mismatch: got %q, want %q", got.ID, created.ID)
+	}
+}
+
+func TestGetRepository_NotFound(t *testing.T) {
+	wsID := setupTestWorkspace(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/workspaces/"+wsID+"/repositories/00000000-0000-0000-0000-000000000000", nil)
+	withWorkspace(req, wsID)
+	req = withURLParam(req, "id", "00000000-0000-0000-0000-000000000000")
+	testHandler.GetRepository(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d, want 404", w.Code)
+	}
+}
