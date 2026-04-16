@@ -127,12 +127,12 @@ type openclawUsage struct {
 
 // openclawResultState accumulates parser output across the stream.
 type openclawResultState struct {
-	status      string
-	errMsg      string
-	output      strings.Builder
-	sessionID   string
-	usage       TokenUsage
-	openBlocks  map[int]*openclawOpenBlock // keyed by event.index
+	status     string
+	errMsg     string
+	output     strings.Builder
+	sessionID  string
+	usage      TokenUsage
+	openBlocks map[int]*openclawOpenBlock // keyed by event.index
 }
 
 // openclawOpenBlock tracks an in-progress content_block (for tool_use buffering).
