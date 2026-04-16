@@ -8,7 +8,7 @@
 
 ## Problem
 
-Multica today represents repositories as a JSON array of URL strings on `workspaces.repos`, worktrees as transient daemon-local state with no server visibility, and PRs as bare URL strings buried inside `agent_task_queue.result` JSON. This makes it impossible to:
+Multica today represents repositories as a JSON array of URL strings on `workspace.repos`, worktrees as transient daemon-local state with no server visibility, and PRs as bare URL strings buried inside `agent_task_queue.result` JSON. This makes it impossible to:
 
 - Query "what worktrees are currently active in this workspace?"
 - Surface PR state in the UI (we only have a URL string)
@@ -19,7 +19,7 @@ Sub-project A promotes **repositories**, **worktrees**, and **pull requests** to
 
 ## Goals
 
-1. **First-class data model** — three new tables: `repositories`, `git_worktrees`, `pull_requests`. All with FKs to `workspaces`, with proper indexes, with queryable state.
+1. **First-class data model** — three new tables: `repositories`, `worktree`, `pull_requests`. All with FKs to `workspaces`, with proper indexes, with queryable state.
 2. **Visible without re-architecture** — operators can manage repositories via a rewritten settings UI; workspace API exposes worktree state.
 3. **Daemon-side worktree tracking** — every worktree the daemon creates has a persisted row; GC marks rows deleted (audit trail).
 4. **Foundation for B–E** — schema includes columns sub-projects B–E will need (e.g., `sparse_paths`, `pr_state`), even if A doesn't yet write them.
@@ -39,7 +39,7 @@ Sub-project A promotes **repositories**, **worktrees**, and **pull requests** to
 ## Prior art
 
 - **[phodal/routa](https://github.com/phodal/routa)** — has `codebases` (their name for repositories) and `worktrees` as first-class entities, persisted via `CodebaseStore` and `WorktreeStore`. Routa does NOT have a `pull_requests` table — they store PR metadata on tasks. We diverge here because sub-project D's polling design needs a stable PR identity.
-- **[anthropics/claude-code](https://github.com/anthropics/claude-code)** — uses git worktrees for session isolation via `--worktree` flag and `isolation: "worktree"` agent definitions. Has `WorktreeCreate` / `WorktreeRemove` HTTP hooks. Has `worktree.sparsePaths` setting for folder scoping in monorepos. We add `sparse_paths` column to `git_worktrees` (dormant in A, populated in B). Hooks are deferred.
+- **[anthropics/claude-code](https://github.com/anthropics/claude-code)** — uses git worktrees for session isolation via `--worktree` flag and `isolation: "worktree"` agent definitions. Has `WorktreeCreate` / `WorktreeRemove` HTTP hooks. Has `worktree.sparsePaths` setting for folder scoping in monorepos. We add `sparse_paths` column to `worktree` (dormant in A, populated in B). Hooks are deferred.
 
 ## Future direction
 
@@ -48,7 +48,7 @@ Sub-project A promotes **repositories**, **worktrees**, and **pull requests** to
 
 ## Approach (chosen: schema + minimal wiring)
 
-Per Q2 (b): schema + minimal daemon/API/UI wiring. Tables get populated immediately for `repositories` (UI writes) and `git_worktrees` (daemon writes); `pull_requests` stays empty until sub-project C wires the population path.
+Per Q2 (b): schema + minimal daemon/API/UI wiring. Tables get populated immediately for `repositories` (UI writes) and `worktree` (daemon writes); `pull_requests` stays empty until sub-project C wires the population path.
 
 ## Architecture
 
@@ -61,7 +61,7 @@ repositories ─────────────┐
    │                      │
    │ 1:N                  │ 1:N
    ▼                      ▼
-git_worktrees       pull_requests
+worktree       pull_requests
    │                      │
    │ N:0..1               │ N:0..1
    ▼                      ▼
@@ -72,12 +72,12 @@ Three new tables, all workspace-scoped via FK. Worktrees and PRs both reference 
 
 ## Schemas
 
-### `repositories` — replaces `workspaces.repos` JSON column
+### `repositories` — replaces `workspace.repos` JSON column
 
 ```sql
-CREATE TABLE repositories (
+CREATE TABLE repository (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id    UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  workspace_id    UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
   url             TEXT NOT NULL,                  -- normalized https URL or git@host:owner/repo.git
   name            TEXT NOT NULL,                  -- human-friendly label, e.g., "frontend"
   default_branch  TEXT NOT NULL DEFAULT 'main',   -- resolved at registration time, can be edited
@@ -90,12 +90,12 @@ CREATE TABLE repositories (
 CREATE INDEX repositories_workspace ON repositories (workspace_id);
 ```
 
-### `git_worktrees` — server-side worktree tracking, written by daemon
+### `worktree` — server-side worktree tracking, written by daemon
 
 ```sql
-CREATE TABLE git_worktrees (
+CREATE TABLE worktree (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  repository_id UUID NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+  repository_id UUID NOT NULL REFERENCES repository(id) ON DELETE CASCADE,
   task_id       UUID REFERENCES agent_task_queue(id) ON DELETE SET NULL,  -- NULL when orphaned
   path          TEXT NOT NULL,                                              -- absolute path in workspaces_root
   branch_name   TEXT NOT NULL,                                              -- e.g., agent/claude/a1b2c3d4
@@ -108,18 +108,20 @@ CREATE TABLE git_worktrees (
   deleted_at    TIMESTAMPTZ,                                                -- set when GC'd
   UNIQUE (repository_id, path)
 );
-CREATE INDEX git_worktrees_task ON git_worktrees (task_id) WHERE task_id IS NOT NULL;
-CREATE INDEX git_worktrees_active ON git_worktrees (repository_id, status) WHERE status = 'active';
+CREATE INDEX worktree_task ON worktree (task_id) WHERE task_id IS NOT NULL;
+CREATE INDEX worktree_active ON worktree (repository_id, status) WHERE status = 'active';
+
+-- (Single-word table name `worktree` matches Multica's existing singular-table-name convention. The `git_` prefix is implicit since worktrees are always git in this codebase.)
 ```
 
 ### `pull_requests` — first-class PR entity (dormant in A; populated by sub-project C)
 
 ```sql
-CREATE TABLE pull_requests (
+CREATE TABLE pull_request (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id        UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  repository_id       UUID NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
-  issue_id            UUID REFERENCES issues(id) ON DELETE SET NULL,        -- NULL: PR not tied to a Multica issue
+  workspace_id        UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  repository_id       UUID NOT NULL REFERENCES repository(id) ON DELETE CASCADE,
+  issue_id            UUID REFERENCES issue(id) ON DELETE SET NULL,        -- NULL: PR not tied to a Multica issue
   task_id             UUID REFERENCES agent_task_queue(id) ON DELETE SET NULL,
   pr_url              TEXT NOT NULL,                                          -- e.g. https://github.com/org/repo/pull/42
   pr_number           INTEGER NOT NULL,
@@ -127,7 +129,7 @@ CREATE TABLE pull_requests (
   base_branch         TEXT NOT NULL,
   state               TEXT NOT NULL DEFAULT 'open',                           -- 'draft' | 'open' | 'merged' | 'closed'
   title               TEXT NOT NULL DEFAULT '',
-  created_by_agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
+  created_by_agent_id UUID REFERENCES agent(id) ON DELETE SET NULL,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_synced_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   merged_at           TIMESTAMPTZ,
@@ -142,7 +144,7 @@ CREATE INDEX pull_requests_state ON pull_requests (state);  -- for sub-project D
 ### Drop existing column
 
 ```sql
-ALTER TABLE workspaces DROP COLUMN repos;  -- the JSON column being replaced
+ALTER TABLE workspace DROP COLUMN repos;  -- the JSON column being replaced
 ```
 
 Per pre-launch assumption: no migration code, no shims. Fresh schema.
@@ -152,7 +154,7 @@ Per pre-launch assumption: no migration code, no shims. Fresh schema.
 - **UUIDs everywhere** — matches existing Multica tables (verified in existing migrations).
 - **Soft delete via `status` for worktrees** — daemon GC sets `status='deleted'` + `deleted_at=NOW()`, preserving audit trail; the partial index `WHERE status='active'` keeps active queries cheap.
 - **`platform` field on repositories from day 1** — sub-project E (OAuth) needs it; cheap to add now, expensive to backfill later.
-- **`sparse_paths TEXT[]` on git_worktrees from day 1** — sub-project B will write to it for folder scoping (Claude Code-style sparse-checkout). Including the column now avoids a follow-up migration.
+- **`sparse_paths TEXT[]` on worktree from day 1** — sub-project B will write to it for folder scoping (Claude Code-style sparse-checkout). Including the column now avoids a follow-up migration.
 - **`pr_state` includes `'draft'`** — needed for GitHub-style draft PRs the agent might open before pushing all commits.
 - **`UNIQUE (workspace_id, url)`** — same URL across workspaces is allowed (different teams' settings); within a workspace, dedupe by URL.
 
@@ -228,7 +230,7 @@ Replace the current JSON-edit form with:
 
 ### Agent context source change
 
-`TaskContextForEnv.Repos` (consumed by `execenv/runtime_config.go:90-104` to render the "## Repositories" section in `AGENTS.md` / `CLAUDE.md`) currently reads from `workspaces.repos` JSON. Change source to a SELECT against the new `repositories` table — same shape returned, no consumer changes needed.
+`TaskContextForEnv.Repos` (consumed by `execenv/runtime_config.go:90-104` to render the "## Repositories" section in `AGENTS.md` / `CLAUDE.md`) currently reads from `workspace.repos` JSON. Change source to a SELECT against the new `repositories` table — same shape returned, no consumer changes needed.
 
 ## Daemon wiring
 
@@ -267,9 +269,9 @@ Existing `multica repo checkout <url>` stays but now validates registration firs
 
 **None.** Per pre-launch assumption (Q1 (a)).
 
-The migration file is just `up` (create new tables, drop `workspaces.repos` JSON column) and `down` (the inverse). No data backfill. No dual-write period. Per CLAUDE.md: "If a flow or API is being replaced and the product is not yet live, prefer removing the old path."
+The migration file is just `up` (create new tables, drop `workspace.repos` JSON column) and `down` (the inverse). No data backfill. No dual-write period. Per CLAUDE.md: "If a flow or API is being replaced and the product is not yet live, prefer removing the old path."
 
-If a deployed instance has populated `workspaces.repos` data we want to preserve, the migration can be hand-edited to add an INSERT-from-JSON step. Baseline assumption is: clean.
+If a deployed instance has populated `workspace.repos` data we want to preserve, the migration can be hand-edited to add an INSERT-from-JSON step. Baseline assumption is: clean.
 
 ## Testing strategy
 
@@ -302,7 +304,7 @@ If a deployed instance has populated `workspaces.repos` data we want to preserve
 |---|---|---|
 | Daemon's HTTP calls add latency to task setup | Medium | One round-trip per worktree create; ~10-50ms; not noticeable next to multi-second `git clone` |
 | `multica repo checkout` requirement breaks agent workflows | Low (pre-launch) | Clear error message tells agent how to register; sub-project C's PR Publisher skill will pre-register if needed |
-| `git_worktrees` table grows monotonically | Low (slow growth: ~1 row per task) | Add separate purge job in future sub-project; not blocking for v1 |
+| `worktree` table grows monotonically | Low (slow growth: ~1 row per task) | Add separate purge job in future sub-project; not blocking for v1 |
 | Frontend rewrite breaks settings tab in subtle ways | Medium | E2E tests cover create-edit-delete flow; manual smoke before merge |
 
 ## Files changed (estimated)
@@ -335,7 +337,7 @@ If a deployed instance has populated `workspaces.repos` data we want to preserve
 2. New workspace settings UI lets the user add/edit/delete repositories; data persists in `repositories` table.
 3. Agent task that does `multica repo checkout <url>` against an unregistered URL fails with a clear error.
 4. After a task completes (existing flow unchanged), querying `GET /workspaces/:wsId/worktrees` shows the worktrees the daemon created, with correct branch/path/status.
-5. After daemon GC reaps a worktree, its `git_worktrees` row has `status='deleted'`.
+5. After daemon GC reaps a worktree, its `worktree` row has `status='deleted'`.
 6. `pull_requests` table exists with all columns, schema reviewed — but stays empty (sub-project C populates it).
 
 ## Open questions deferred to implementation
@@ -343,4 +345,4 @@ If a deployed instance has populated `workspaces.repos` data we want to preserve
 1. **Migration number** — next available is `046` (current highest is `045_audit_dashboard_route_slugs`). Plan will use `046_repositories_worktrees_pull_requests`.
 2. **`platform` validation** — should the API validate `platform` is one of `('github', 'gitlab', 'other')` or accept any string? Default to enum-like CHECK constraint for now; relax if needed.
 3. **`agents` table FK on `pull_requests.created_by_agent_id`** — verify the `agents` table name and PK type during plan-writing.
-4. **Existing `workspace.repos` consumers** — grep for `.Repos` and `workspaces.repos` references; may include UI components I haven't catalogued.
+4. **Existing `workspace.repos` consumers** — grep for `.Repos` and `workspace.repos` references; may include UI components I haven't catalogued.
