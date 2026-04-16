@@ -57,3 +57,6 @@ _features/
 server/server
 data/
 .kilo
+
+# git worktrees (used by superpowers tooling for isolated feature branches)
+.worktrees/
