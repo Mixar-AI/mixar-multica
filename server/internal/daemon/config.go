@@ -2,12 +2,16 @@ package daemon
 
 import (
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon/openclawcfg"
 )
 
 const (
@@ -77,6 +81,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 
+	// Profile
+	profile := overrides.Profile
+
 	// Probe available agent CLIs
 	agents := map[string]AgentEntry{}
 	claudePath := envOrDefault("MULTICA_CLAUDE_PATH", "claude")
@@ -100,11 +107,20 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_OPENCODE_MODEL")),
 		}
 	}
+	var openclawConfigPath string
 	openclawPath := envOrDefault("MULTICA_OPENCLAW_PATH", "openclaw")
 	if _, err := exec.LookPath(openclawPath); err == nil {
 		agents["openclaw"] = AgentEntry{
 			Path:  openclawPath,
 			Model: strings.TrimSpace(os.Getenv("MULTICA_OPENCLAW_MODEL")),
+		}
+		profileDir, perr := cli.ProfileDir(profile)
+		if perr != nil {
+			slog.Default().Warn("openclaw: cannot resolve profile dir; live streaming disabled", "error", perr)
+		} else if cfgPath, cerr := openclawcfg.EnsureConfig(profileDir); cerr != nil {
+			slog.Default().Warn("openclaw: config write failed; live streaming disabled", "error", cerr)
+		} else {
+			openclawConfigPath = cfgPath
 		}
 	}
 	hermesPath := envOrDefault("MULTICA_HERMES_PATH", "hermes")
@@ -185,9 +201,6 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		maxConcurrentTasks = overrides.MaxConcurrentTasks
 	}
 
-	// Profile
-	profile := overrides.Profile
-
 	// String overrides
 	daemonID := envOrDefault("MULTICA_DAEMON_ID", host)
 	if overrides.DaemonID != "" {
@@ -263,6 +276,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		RuntimeName:        runtimeName,
 		Profile:            profile,
 		Agents:             agents,
+		OpenclawConfigPath: openclawConfigPath,
 		WorkspacesRoot:     workspacesRoot,
 		KeepEnvAfterTask:   keepEnv,
 		GCEnabled:          gcEnabled,
