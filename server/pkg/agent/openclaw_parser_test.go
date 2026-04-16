@@ -259,3 +259,31 @@ func TestOpenclawParserResultIsErrorMarksFailed(t *testing.T) {
 		t.Errorf("errMsg = %q", state.errMsg)
 	}
 }
+
+func TestOpenclawParserSkipsUnknownEnvelopeAndMalformedLines(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{
+		`{"type":"future_event","payload":{"anything":true}}`,
+		`this is not json`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}}`,
+		`{"type":"stream_event","event":{"type":"future_inner_event"}}`,
+		`{"type":"result","result":"done"}`,
+	}
+	input := strings.Join(lines, "\n") + "\n"
+
+	ch := make(chan Message, 16)
+	state := processOpenclawOutput(strings.NewReader(input), ch, slog.Default())
+	close(ch)
+
+	if state.status != "completed" {
+		t.Errorf("status = %q, want completed", state.status)
+	}
+	msgs := drainMessages(ch)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 text message (the only valid stream_event), got %d (%+v)", len(msgs), msgs)
+	}
+	if msgs[0].Type != MessageText || msgs[0].Content != "hello" {
+		t.Errorf("msg[0] = %+v", msgs[0])
+	}
+}
