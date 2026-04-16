@@ -181,3 +181,31 @@ func TestOpenclawParserToolUseStripsMCPPrefix(t *testing.T) {
 		t.Errorf("tool = %q, want %q (MCP prefix should be stripped)", msgs[0].Tool, "create_issue")
 	}
 }
+
+func TestOpenclawParserThinkingDeltaEmits(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{
+		`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Considering the trade-offs..."}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_abc"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_stop","index":0}}`,
+	}
+	input := strings.Join(lines, "\n") + "\n"
+
+	ch := make(chan Message, 16)
+	processOpenclawOutput(strings.NewReader(input), ch, slog.Default())
+	close(ch)
+
+	msgs := drainMessages(ch)
+	// signature_delta is acknowledged but not surfaced as a Message.
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 thinking message (signature_delta is silent), got %d", len(msgs))
+	}
+	if msgs[0].Type != MessageThinking {
+		t.Errorf("type = %s, want %s", msgs[0].Type, MessageThinking)
+	}
+	if msgs[0].Content != "Considering the trade-offs..." {
+		t.Errorf("content = %q", msgs[0].Content)
+	}
+}

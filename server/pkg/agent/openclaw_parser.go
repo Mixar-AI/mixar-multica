@@ -255,6 +255,10 @@ func (s *openclawResultState) handleContentBlockDelta(ev openclawStreamEvent, ch
 		if ev.Delta.Thinking != "" {
 			trySend(ch, Message{Type: MessageThinking, Content: ev.Delta.Thinking})
 		}
+	case "signature_delta":
+		// Extended-thinking signature verification — acknowledged but not surfaced.
+		// Routa pattern: stored alongside thinking text; we don't expose signatures
+		// in the UI so we no-op silently.
 	}
 }
 
