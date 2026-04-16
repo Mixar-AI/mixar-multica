@@ -336,6 +336,37 @@ type Project struct {
 	Priority    string             `json:"priority"`
 }
 
+type PullRequest struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	RepositoryID     pgtype.UUID        `json:"repository_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	TaskID           pgtype.UUID        `json:"task_id"`
+	PrUrl            string             `json:"pr_url"`
+	PrNumber         int32              `json:"pr_number"`
+	HeadBranch       string             `json:"head_branch"`
+	BaseBranch       string             `json:"base_branch"`
+	State            string             `json:"state"`
+	Title            string             `json:"title"`
+	CreatedByAgentID pgtype.UUID        `json:"created_by_agent_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	LastSyncedAt     pgtype.Timestamptz `json:"last_synced_at"`
+	MergedAt         pgtype.Timestamptz `json:"merged_at"`
+	ClosedAt         pgtype.Timestamptz `json:"closed_at"`
+}
+
+type Repository struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Url           string             `json:"url"`
+	Name          string             `json:"name"`
+	DefaultBranch string             `json:"default_branch"`
+	Description   string             `json:"description"`
+	Platform      string             `json:"platform"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type RuntimeUsage struct {
 	ID               pgtype.UUID        `json:"id"`
 	RuntimeID        pgtype.UUID        `json:"runtime_id"`
@@ -423,7 +454,6 @@ type Workspace struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	Context      pgtype.Text        `json:"context"`
-	Repos        []byte             `json:"repos"`
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
 }
@@ -439,4 +469,19 @@ type WorkspaceInvitation struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+}
+
+type Worktree struct {
+	ID           pgtype.UUID        `json:"id"`
+	RepositoryID pgtype.UUID        `json:"repository_id"`
+	TaskID       pgtype.UUID        `json:"task_id"`
+	Path         string             `json:"path"`
+	BranchName   string             `json:"branch_name"`
+	BaseBranch   string             `json:"base_branch"`
+	Status       string             `json:"status"`
+	HeadSha      string             `json:"head_sha"`
+	SparsePaths  []string           `json:"sparse_paths"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	LastUsedAt   pgtype.Timestamptz `json:"last_used_at"`
+	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
 }

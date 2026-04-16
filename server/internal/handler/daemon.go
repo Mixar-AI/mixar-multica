@@ -236,8 +236,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		ownerID = member.UserID
 	}
 
-	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(req.WorkspaceID))
-	if err != nil {
+	if _, err := h.Queries.GetWorkspace(r.Context(), parseUUID(req.WorkspaceID)); err != nil {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
@@ -317,11 +316,10 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"runtimes": resp,
 	})
 
-	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"runtimes":      resp,
-		"repos":         repoResp.Repos,
-		"repos_version": repoResp.ReposVersion,
+		"repos":         []RepoData{},
+		"repos_version": workspaceReposVersion(nil),
 	})
 }
 
@@ -331,13 +329,12 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
-	if err != nil {
+	if _, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID)); err != nil {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos))
+	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, nil))
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
@@ -486,16 +483,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Include workspace ID and repos so the daemon can set up worktrees.
+	// Include workspace ID so the daemon can associate the task with a workspace.
+	// Repos are now sourced from the repository table (sub-project B wires this).
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
-			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
-				}
-			}
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -521,16 +513,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Chat task: populate workspace/session info from the chat_session table.
+	// Repos are now sourced from the repository table (sub-project B wires this).
 	if task.ChatSessionID.Valid {
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
-			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
-				}
-			}
 			// Resume from the chat session's persistent session.
 			if cs.SessionID.Valid {
 				resp.PriorSessionID = cs.SessionID.String
