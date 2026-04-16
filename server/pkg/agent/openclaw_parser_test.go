@@ -209,3 +209,53 @@ func TestOpenclawParserThinkingDeltaEmits(t *testing.T) {
 		t.Errorf("content = %q", msgs[0].Content)
 	}
 }
+
+func TestOpenclawParserResultEnvelopeReplacesOutputAndCapturesUsage(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial..."}}}`,
+		`{"type":"result","result":"final answer text","is_error":false,"usage":{"input_tokens":120,"output_tokens":45,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}`,
+	}
+	input := strings.Join(lines, "\n") + "\n"
+
+	ch := make(chan Message, 16)
+	state := processOpenclawOutput(strings.NewReader(input), ch, slog.Default())
+	close(ch)
+
+	if state.status != "completed" {
+		t.Errorf("status = %q, want completed", state.status)
+	}
+	if state.output.String() != "final answer text" {
+		t.Errorf("output = %q, want %q", state.output.String(), "final answer text")
+	}
+	if state.usage.InputTokens != 120 {
+		t.Errorf("input tokens = %d, want 120", state.usage.InputTokens)
+	}
+	if state.usage.OutputTokens != 45 {
+		t.Errorf("output tokens = %d, want 45", state.usage.OutputTokens)
+	}
+	if state.usage.CacheReadTokens != 10 {
+		t.Errorf("cache read = %d, want 10", state.usage.CacheReadTokens)
+	}
+	if state.usage.CacheWriteTokens != 5 {
+		t.Errorf("cache write = %d, want 5", state.usage.CacheWriteTokens)
+	}
+}
+
+func TestOpenclawParserResultIsErrorMarksFailed(t *testing.T) {
+	t.Parallel()
+
+	input := `{"type":"result","result":"model not found: gpt-99","is_error":true}` + "\n"
+
+	ch := make(chan Message, 16)
+	state := processOpenclawOutput(strings.NewReader(input), ch, slog.Default())
+	close(ch)
+
+	if state.status != "failed" {
+		t.Errorf("status = %q, want failed", state.status)
+	}
+	if state.errMsg != "model not found: gpt-99" {
+		t.Errorf("errMsg = %q", state.errMsg)
+	}
+}
