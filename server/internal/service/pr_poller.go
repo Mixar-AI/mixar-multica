@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -18,6 +19,17 @@ type GitHubClient interface {
 	FetchPR(ctx context.Context, owner, repo string, number int) (*GHPullRequest, error)
 	FetchReviewComments(ctx context.Context, owner, repo string, number int, since time.Time) ([]GHReviewComment, error)
 }
+
+// TokenProvider resolves a GitHub access token for a given workspace.
+// Implementations should try the workspace_integration table first and fall
+// back to the GITHUB_TOKEN env var when no row is found.
+type TokenProvider interface {
+	GetGitHubToken(ctx context.Context, workspaceID uuid.UUID) (string, error)
+}
+
+// GitHubClientFactory creates a GitHubClient for a given token. Used by the
+// poller to build a per-workspace client when a TokenProvider is configured.
+type GitHubClientFactory func(token string) GitHubClient
 
 // GHPullRequest mirrors github.PR without importing the package, keeping
 // the service layer decoupled from the github package.
@@ -47,13 +59,16 @@ type GHReviewComment struct {
 // back to the database. When review activity is detected, it dispatches a
 // follow-up agent task so the agent can address reviewer feedback.
 type PRPoller struct {
-	Queries *db.Queries
-	GitHub  GitHubClient
-	TaskSvc *TaskService
-	Logger  *slog.Logger
+	Queries       *db.Queries
+	GitHub        GitHubClient         // used when TokenProvider is nil (legacy single-token mode)
+	TokenProvider TokenProvider        // optional; enables per-workspace tokens
+	ClientFactory GitHubClientFactory  // required when TokenProvider is set
+	TaskSvc       *TaskService
+	Logger        *slog.Logger
 }
 
-// NewPRPoller creates a new PRPoller.
+// NewPRPoller creates a new PRPoller using a shared GitHubClient.
+// Use NewPRPollerWithTokenProvider to enable per-workspace token lookup.
 func NewPRPoller(q *db.Queries, gh GitHubClient, taskSvc *TaskService) *PRPoller {
 	return &PRPoller{
 		Queries: q,
@@ -61,6 +76,41 @@ func NewPRPoller(q *db.Queries, gh GitHubClient, taskSvc *TaskService) *PRPoller
 		TaskSvc: taskSvc,
 		Logger:  slog.Default(),
 	}
+}
+
+// NewPRPollerWithTokenProvider creates a PRPoller that resolves tokens
+// per-workspace using the given TokenProvider and builds per-PR clients via
+// the factory. Falls back to legacy GitHub env var token when provider returns
+// an error.
+func NewPRPollerWithTokenProvider(q *db.Queries, tp TokenProvider, factory GitHubClientFactory, taskSvc *TaskService) *PRPoller {
+	return &PRPoller{
+		Queries:       q,
+		TokenProvider: tp,
+		ClientFactory: factory,
+		TaskSvc:       taskSvc,
+		Logger:        slog.Default(),
+	}
+}
+
+// resolveClientForPR returns the GitHubClient to use for the given PR.
+// When a TokenProvider is configured, it resolves a per-workspace token.
+// Falls back to the shared GitHub client (or a GITHUB_TOKEN env var client).
+func (p *PRPoller) resolveClientForPR(ctx context.Context, pr db.PullRequest) GitHubClient {
+	if p.TokenProvider == nil || p.ClientFactory == nil {
+		return p.GitHub
+	}
+
+	wsUUID, err := uuid.Parse(util.UUIDToString(pr.WorkspaceID))
+	if err != nil {
+		return p.GitHub
+	}
+
+	token, err := p.TokenProvider.GetGitHubToken(ctx, wsUUID)
+	if err != nil || token == "" {
+		p.Logger.Debug("pr poller: no workspace token, using fallback", "workspace_id", wsUUID, "error", err)
+		return p.GitHub
+	}
+	return p.ClientFactory(token)
 }
 
 // Run starts the poll loop. It blocks until ctx is cancelled.
@@ -119,7 +169,8 @@ func (p *PRPoller) syncPR(ctx context.Context, pr db.PullRequest) {
 		return
 	}
 
-	ghPR, err := p.GitHub.FetchPR(ctx, owner, repo, number)
+	ghClient := p.resolveClientForPR(ctx, pr)
+	ghPR, err := ghClient.FetchPR(ctx, owner, repo, number)
 	if err != nil {
 		p.Logger.Warn("pr poller: fetch PR failed",
 			"pr_id", util.UUIDToString(pr.ID),
@@ -178,7 +229,8 @@ func (p *PRPoller) syncPR(ctx context.Context, pr db.PullRequest) {
 // checkReviewFeedback fetches new review comments and, if any exist, dispatches
 // a follow-up agent task so the assigned agent can address reviewer feedback.
 func (p *PRPoller) checkReviewFeedback(ctx context.Context, pr db.PullRequest, owner, repo string, number int, since time.Time) {
-	comments, err := p.GitHub.FetchReviewComments(ctx, owner, repo, number, since)
+	ghClient := p.resolveClientForPR(ctx, pr)
+	comments, err := ghClient.FetchReviewComments(ctx, owner, repo, number, since)
 	if err != nil {
 		p.Logger.Warn("pr poller: fetch review comments failed",
 			"pr_id", util.UUIDToString(pr.ID),

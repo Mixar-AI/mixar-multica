@@ -55,3 +55,15 @@ func (a *githubClientAdapter) FetchReviewComments(ctx context.Context, owner, re
 func NewPRPollerFromGitHubClient(q *db.Queries, c *github.Client, taskSvc *TaskService) *PRPoller {
 	return NewPRPoller(q, &githubClientAdapter{c: c}, taskSvc)
 }
+
+// githubClientFactory is a GitHubClientFactory that creates real *github.Client adapters.
+func githubClientFactory(token string) GitHubClient {
+	return &githubClientAdapter{c: github.NewClient(token)}
+}
+
+// NewPRPollerWithDBTokens creates a PRPoller that resolves per-workspace GitHub
+// tokens from the database via DBTokenProvider, falling back to GITHUB_TOKEN env var.
+// Use this in main when per-workspace OAuth tokens are available.
+func NewPRPollerWithDBTokens(q *db.Queries, taskSvc *TaskService) *PRPoller {
+	return NewPRPollerWithTokenProvider(q, NewDBTokenProvider(q), githubClientFactory, taskSvc)
+}

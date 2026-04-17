@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/github"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -86,9 +85,14 @@ func main() {
 	go runRuntimeSweeper(sweepCtx, queries, bus)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 
-	// Start PR poller if GITHUB_TOKEN is set.
+	// Start PR poller if GITHUB_TOKEN is set or GitHub OAuth integration is configured.
+	// When per-workspace OAuth tokens are available (GITHUB_OAUTH_CLIENT_ID set),
+	// the poller resolves tokens per-workspace from the database. GITHUB_TOKEN
+	// serves as the fallback for workspaces without a stored integration.
 	prPollerCtx, prPollerCancel := context.WithCancel(context.Background())
-	if ghToken := os.Getenv("GITHUB_TOKEN"); ghToken != "" {
+	githubTokenSet := os.Getenv("GITHUB_TOKEN") != ""
+	githubOAuthSet := os.Getenv("GITHUB_OAUTH_CLIENT_ID") != ""
+	if githubTokenSet || githubOAuthSet {
 		pollInterval := 2 * time.Minute
 		if raw := os.Getenv("MULTICA_PR_POLL_INTERVAL"); raw != "" {
 			if d, err := time.ParseDuration(raw); err == nil {
@@ -97,12 +101,11 @@ func main() {
 				slog.Warn("invalid MULTICA_PR_POLL_INTERVAL, using default", "value", raw, "default", pollInterval)
 			}
 		}
-		ghClient := github.NewClient(ghToken)
-		poller := service.NewPRPollerFromGitHubClient(queries, ghClient, taskSvc)
+		poller := service.NewPRPollerWithDBTokens(queries, taskSvc)
 		go poller.Run(prPollerCtx, pollInterval)
 		slog.Info("pr poller started", "interval", pollInterval)
 	} else {
-		slog.Warn("GITHUB_TOKEN not set — PR poller disabled")
+		slog.Warn("GITHUB_TOKEN not set and GITHUB_OAUTH_CLIENT_ID not set — PR poller disabled")
 		prPollerCancel() // no-op cancel to clean up the context
 	}
 
