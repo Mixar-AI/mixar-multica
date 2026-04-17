@@ -18,7 +18,24 @@ hash_value="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
 offset=$((hash_value % 1000))
 
 postgres_db="multica_${slug}_${offset}"
-postgres_port=5432
+
+# POSTGRES_PORT resolution order (highest priority first):
+#   1. POSTGRES_PORT env var explicitly set by caller
+#   2. POSTGRES_PORT from the main checkout's .env (if one exists)
+#   3. Default 5432
+#
+# This lets contributors who run another postgres on 5432 (e.g., a system
+# postgresql@17) set POSTGRES_PORT=5433 once in the main .env and have all
+# worktrees inherit it automatically.
+postgres_port="${POSTGRES_PORT:-}"
+if [ -z "$postgres_port" ]; then
+  repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+  if [ -f "$repo_root/.env" ]; then
+    postgres_port="$(grep -E '^POSTGRES_PORT=' "$repo_root/.env" | head -1 | cut -d= -f2-)"
+  fi
+fi
+postgres_port="${postgres_port:-5432}"
+
 backend_port=$((18080 + offset))
 frontend_port=$((13000 + offset))
 frontend_origin="http://localhost:${frontend_port}"
