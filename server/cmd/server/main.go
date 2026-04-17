@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/github"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -85,6 +86,26 @@ func main() {
 	go runRuntimeSweeper(sweepCtx, queries, bus)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 
+	// Start PR poller if GITHUB_TOKEN is set.
+	prPollerCtx, prPollerCancel := context.WithCancel(context.Background())
+	if ghToken := os.Getenv("GITHUB_TOKEN"); ghToken != "" {
+		pollInterval := 2 * time.Minute
+		if raw := os.Getenv("MULTICA_PR_POLL_INTERVAL"); raw != "" {
+			if d, err := time.ParseDuration(raw); err == nil {
+				pollInterval = d
+			} else {
+				slog.Warn("invalid MULTICA_PR_POLL_INTERVAL, using default", "value", raw, "default", pollInterval)
+			}
+		}
+		ghClient := github.NewClient(ghToken)
+		poller := service.NewPRPollerFromGitHubClient(queries, ghClient, taskSvc)
+		go poller.Run(prPollerCtx, pollInterval)
+		slog.Info("pr poller started", "interval", pollInterval)
+	} else {
+		slog.Warn("GITHUB_TOKEN not set — PR poller disabled")
+		prPollerCancel() // no-op cancel to clean up the context
+	}
+
 	// Graceful shutdown
 	go func() {
 		slog.Info("server starting", "port", port)
@@ -101,6 +122,7 @@ func main() {
 	slog.Info("shutting down server")
 	sweepCancel()
 	autopilotCancel()
+	prPollerCancel()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
