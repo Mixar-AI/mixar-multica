@@ -90,6 +90,7 @@ import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 
 import { ProgressRing } from "./progress-ring";
+import { LinkedPRPanel } from "./linked-pr-panel";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -1294,6 +1295,13 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             <div className="mt-3">
               <TaskRunHistory issueId={id} />
             </div>
+
+            {/* Linked pull requests */}
+            {wsId && (
+              <div className="mt-3">
+                <LinkedPRPanel wsId={wsId} issueId={id} />
+              </div>
+            )}
 
             {/* Timeline entries */}
             <div className="mt-4 flex flex-col gap-3">
