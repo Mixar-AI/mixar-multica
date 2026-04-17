@@ -10,6 +10,7 @@ import type {
   ListIssuesResponse,
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
+import type { DispatchTaskInput } from "../api/client";
 
 // ---------------------------------------------------------------------------
 // Shared mutation variable types — used by both mutation hooks and
@@ -296,6 +297,23 @@ export function useBatchDeleteIssues() {
         }
         qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
       }
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Task dispatch
+// ---------------------------------------------------------------------------
+
+/** Dispatch a task for an issue with optional per-task picker fields. */
+export function useDispatchTask(issueId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (input: DispatchTaskInput) => api.dispatchTask(issueId, input),
+    onSettled: () => {
+      // Invalidate the issue detail so the active-task badge refreshes.
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
     },
   });
 }

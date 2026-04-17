@@ -4,6 +4,7 @@ export type {
   Repository,
   CreateRepositoryInput,
   UpdateRepositoryInput,
+  DispatchTaskInput,
   Worktree,
   ListWorktreesParams,
 } from "./client";

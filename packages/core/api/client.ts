@@ -101,6 +101,15 @@ export interface UpdateRepositoryInput {
   default_branch?: string;
 }
 
+// Task dispatch input — all picker fields are optional; omitting them keeps
+// the existing auto-pick behaviour on the daemon side.
+export interface DispatchTaskInput {
+  repository_id?: string;
+  base_branch?: string;
+  reuse_worktree?: boolean;
+  sparse_paths?: string[];
+}
+
 // Worktree types
 export interface Worktree {
   id: string;
@@ -542,6 +551,13 @@ export class ApiClient {
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
+    });
+  }
+
+  async dispatchTask(issueId: string, input: DispatchTaskInput): Promise<AgentTask> {
+    return this.fetch(`/api/issues/${issueId}/dispatch`, {
+      method: "POST",
+      body: JSON.stringify(input),
     });
   }
 
