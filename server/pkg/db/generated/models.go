@@ -82,6 +82,10 @@ type AgentTaskQueue struct {
 	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
 	ChatSessionID    pgtype.UUID        `json:"chat_session_id"`
 	AutopilotRunID   pgtype.UUID        `json:"autopilot_run_id"`
+	RepositoryID     pgtype.UUID        `json:"repository_id"`
+	BaseBranch       pgtype.Text        `json:"base_branch"`
+	ReuseWorktree    bool               `json:"reuse_worktree"`
+	SparsePaths      []string           `json:"sparse_paths"`
 }
 
 type Attachment struct {

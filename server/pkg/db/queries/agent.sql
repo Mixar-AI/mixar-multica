@@ -58,8 +58,14 @@ WHERE agent_id = $1
 ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id)
-VALUES ($1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id))
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    repository_id, base_branch, reuse_worktree, sparse_paths
+) VALUES (
+    $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
+    sqlc.narg(repository_id), sqlc.narg(base_branch),
+    @reuse_worktree, sqlc.narg(sparse_paths)
+)
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :exec

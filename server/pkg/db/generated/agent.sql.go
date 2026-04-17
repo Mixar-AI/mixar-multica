@@ -53,7 +53,7 @@ const cancelAgentTask = `-- name: CancelAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE id = $1 AND status IN ('queued', 'dispatched', 'running')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, repository_id, base_branch, reuse_worktree, sparse_paths
 `
 
 func (q *Queries) CancelAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
@@ -78,6 +78,10 @@ func (q *Queries) CancelAgentTask(ctx context.Context, id pgtype.UUID) (AgentTas
 		&i.TriggerCommentID,
 		&i.ChatSessionID,
 		&i.AutopilotRunID,
+		&i.RepositoryID,
+		&i.BaseBranch,
+		&i.ReuseWorktree,
+		&i.SparsePaths,
 	)
 	return i, err
 }
@@ -123,7 +127,7 @@ WHERE id = (
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, repository_id, base_branch, reuse_worktree, sparse_paths
 `
 
 // Claims the next queued task for an agent, enforcing per-(issue, agent) serialization:
@@ -153,6 +157,10 @@ func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (Agen
 		&i.TriggerCommentID,
 		&i.ChatSessionID,
 		&i.AutopilotRunID,
+		&i.RepositoryID,
+		&i.BaseBranch,
+		&i.ReuseWorktree,
+		&i.SparsePaths,
 	)
 	return i, err
 }
@@ -161,7 +169,7 @@ const completeAgentTask = `-- name: CompleteAgentTask :one
 UPDATE agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2, session_id = $3, work_dir = $4
 WHERE id = $1 AND status = 'running'
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, repository_id, base_branch, reuse_worktree, sparse_paths
 `
 
 type CompleteAgentTaskParams struct {
@@ -198,6 +206,10 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 		&i.TriggerCommentID,
 		&i.ChatSessionID,
 		&i.AutopilotRunID,
+		&i.RepositoryID,
+		&i.BaseBranch,
+		&i.ReuseWorktree,
+		&i.SparsePaths,
 	)
 	return i, err
 }
@@ -281,9 +293,15 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 }
 
 const createAgentTask = `-- name: CreateAgentTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id)
-VALUES ($1, $2, $3, 'queued', $4, $5)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    repository_id, base_branch, reuse_worktree, sparse_paths
+) VALUES (
+    $1, $2, $3, 'queued', $4, $5,
+    $6, $7,
+    $8, $9
+)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, repository_id, base_branch, reuse_worktree, sparse_paths
 `
 
 type CreateAgentTaskParams struct {
@@ -292,6 +310,10 @@ type CreateAgentTaskParams struct {
 	IssueID          pgtype.UUID `json:"issue_id"`
 	Priority         int32       `json:"priority"`
 	TriggerCommentID pgtype.UUID `json:"trigger_comment_id"`
+	RepositoryID     pgtype.UUID `json:"repository_id"`
+	BaseBranch       pgtype.Text `json:"base_branch"`
+	ReuseWorktree    bool        `json:"reuse_worktree"`
+	SparsePaths      []string    `json:"sparse_paths"`
 }
 
 func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams) (AgentTaskQueue, error) {
@@ -301,6 +323,10 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.IssueID,
 		arg.Priority,
 		arg.TriggerCommentID,
+		arg.RepositoryID,
+		arg.BaseBranch,
+		arg.ReuseWorktree,
+		arg.SparsePaths,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -322,6 +348,10 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		&i.TriggerCommentID,
 		&i.ChatSessionID,
 		&i.AutopilotRunID,
+		&i.RepositoryID,
+		&i.BaseBranch,
+		&i.ReuseWorktree,
+		&i.SparsePaths,
 	)
 	return i, err
 }
@@ -330,7 +360,7 @@ const failAgentTask = `-- name: FailAgentTask :one
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = $2
 WHERE id = $1 AND status IN ('dispatched', 'running')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, repository_id, base_branch, reuse_worktree, sparse_paths
 `
 
 type FailAgentTaskParams struct {
@@ -360,6 +390,10 @@ func (q *Queries) FailAgentTask(ctx context.Context, arg FailAgentTaskParams) (A
 		&i.TriggerCommentID,
 		&i.ChatSessionID,
 		&i.AutopilotRunID,
+		&i.RepositoryID,
+		&i.BaseBranch,
+		&i.ReuseWorktree,
+		&i.SparsePaths,
 	)
 	return i, err
 }
@@ -476,7 +510,7 @@ func (q *Queries) GetAgentInWorkspace(ctx context.Context, arg GetAgentInWorkspa
 }
 
 const getAgentTask = `-- name: GetAgentTask :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, repository_id, base_branch, reuse_worktree, sparse_paths FROM agent_task_queue
 WHERE id = $1
 `
 
@@ -502,6 +536,10 @@ func (q *Queries) GetAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQu
 		&i.TriggerCommentID,
 		&i.ChatSessionID,
 		&i.AutopilotRunID,
+		&i.RepositoryID,
+		&i.BaseBranch,
+		&i.ReuseWorktree,
+		&i.SparsePaths,
 	)
 	return i, err
 }
@@ -581,7 +619,7 @@ func (q *Queries) HasPendingTaskForIssueAndAgent(ctx context.Context, arg HasPen
 }
 
 const listActiveTasksByIssue = `-- name: ListActiveTasksByIssue :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, repository_id, base_branch, reuse_worktree, sparse_paths FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('dispatched', 'running')
 ORDER BY created_at DESC
 `
@@ -614,6 +652,10 @@ func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUI
 			&i.TriggerCommentID,
 			&i.ChatSessionID,
 			&i.AutopilotRunID,
+			&i.RepositoryID,
+			&i.BaseBranch,
+			&i.ReuseWorktree,
+			&i.SparsePaths,
 		); err != nil {
 			return nil, err
 		}
@@ -626,7 +668,7 @@ func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUI
 }
 
 const listAgentTasks = `-- name: ListAgentTasks :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, repository_id, base_branch, reuse_worktree, sparse_paths FROM agent_task_queue
 WHERE agent_id = $1
 ORDER BY created_at DESC
 `
@@ -659,6 +701,10 @@ func (q *Queries) ListAgentTasks(ctx context.Context, agentID pgtype.UUID) ([]Ag
 			&i.TriggerCommentID,
 			&i.ChatSessionID,
 			&i.AutopilotRunID,
+			&i.RepositoryID,
+			&i.BaseBranch,
+			&i.ReuseWorktree,
+			&i.SparsePaths,
 		); err != nil {
 			return nil, err
 		}
@@ -763,7 +809,7 @@ func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([
 }
 
 const listPendingTasksByRuntime = `-- name: ListPendingTasksByRuntime :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, repository_id, base_branch, reuse_worktree, sparse_paths FROM agent_task_queue
 WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')
 ORDER BY priority DESC, created_at ASC
 `
@@ -796,6 +842,10 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 			&i.TriggerCommentID,
 			&i.ChatSessionID,
 			&i.AutopilotRunID,
+			&i.RepositoryID,
+			&i.BaseBranch,
+			&i.ReuseWorktree,
+			&i.SparsePaths,
 		); err != nil {
 			return nil, err
 		}
@@ -808,7 +858,7 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 }
 
 const listTasksByIssue = `-- name: ListTasksByIssue :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, repository_id, base_branch, reuse_worktree, sparse_paths FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC
 `
@@ -841,6 +891,10 @@ func (q *Queries) ListTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]
 			&i.TriggerCommentID,
 			&i.ChatSessionID,
 			&i.AutopilotRunID,
+			&i.RepositoryID,
+			&i.BaseBranch,
+			&i.ReuseWorktree,
+			&i.SparsePaths,
 		); err != nil {
 			return nil, err
 		}
@@ -889,7 +943,7 @@ const startAgentTask = `-- name: StartAgentTask :one
 UPDATE agent_task_queue
 SET status = 'running', started_at = now()
 WHERE id = $1 AND status = 'dispatched'
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, repository_id, base_branch, reuse_worktree, sparse_paths
 `
 
 func (q *Queries) StartAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
@@ -914,6 +968,10 @@ func (q *Queries) StartAgentTask(ctx context.Context, id pgtype.UUID) (AgentTask
 		&i.TriggerCommentID,
 		&i.ChatSessionID,
 		&i.AutopilotRunID,
+		&i.RepositoryID,
+		&i.BaseBranch,
+		&i.ReuseWorktree,
+		&i.SparsePaths,
 	)
 	return i, err
 }
