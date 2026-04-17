@@ -665,6 +665,14 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Best-effort: capture PR URL if the agent reported one.
+	if req.PRURL != "" {
+		wsID := h.resolveTaskWorkspaceID(r, *task)
+		if wsID != "" {
+			h.capturePullRequest(r.Context(), parseUUID(wsID), parseUUID(taskID), req)
+		}
+	}
+
 	slog.Info("task completed", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
 	writeJSON(w, http.StatusOK, taskToResponse(*task))
 }
