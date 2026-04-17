@@ -126,6 +126,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	r.Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/logout", h.Logout)
 
+	// GitHub OAuth callback — public (GitHub redirects here; session cookie auth not available).
+	r.Get("/api/integrations/github/callback", h.GitHubCallback)
+
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries))
@@ -261,6 +264,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
 				})
+			})
+
+			// Integrations
+			r.Route("/api/integrations", func(r chi.Router) {
+				r.Get("/", h.ListIntegrations)
+				r.Get("/github/authorize", h.GitHubAuthorizeURL)
+				r.Get("/github/repositories", h.ListGitHubRepositories)
 			})
 
 			// Repositories
