@@ -1004,6 +1004,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
 	}
+	// Pass picker fields so `multica repo checkout` forwards them to the
+	// daemon's /repo/checkout handler, which applies them to CreateWorktree.
+	if task.BaseBranch != "" {
+		agentEnv["MULTICA_BASE_BRANCH"] = task.BaseBranch
+	}
+	if task.ReuseWorktree {
+		agentEnv["MULTICA_REUSE_WORKTREE"] = "true"
+	}
+	if len(task.SparsePaths) > 0 {
+		agentEnv["MULTICA_SPARSE_PATHS"] = strings.Join(task.SparsePaths, ",")
+	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
 	// inherit the daemon's PATH. Prepend the directory of the running

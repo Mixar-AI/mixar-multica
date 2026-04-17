@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -45,11 +46,14 @@ func (d *Daemon) listenHealth() (net.Listener, error) {
 
 // repoCheckoutRequest is the body of a POST /repo/checkout request.
 type repoCheckoutRequest struct {
-	URL         string `json:"url"`
-	WorkspaceID string `json:"workspace_id"`
-	WorkDir     string `json:"workdir"`
-	AgentName   string `json:"agent_name"`
-	TaskID      string `json:"task_id"`
+	URL          string   `json:"url"`
+	WorkspaceID  string   `json:"workspace_id"`
+	WorkDir      string   `json:"workdir"`
+	AgentName    string   `json:"agent_name"`
+	TaskID       string   `json:"task_id"`
+	BaseBranch   string   `json:"base_branch,omitempty"`
+	ReuseWorktree bool    `json:"reuse_worktree,omitempty"`
+	SparsePaths  []string `json:"sparse_paths,omitempty"`
 }
 
 // healthHandler returns the /health HTTP handler. Extracted from serveHealth
@@ -135,16 +139,27 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 		}
 
 		result, err := d.repoCache.CreateWorktree(r.Context(), repocache.WorktreeParams{
-			WorkspaceID: req.WorkspaceID,
-			RepoURL:     req.URL,
-			WorkDir:     req.WorkDir,
-			AgentName:   req.AgentName,
-			TaskID:      req.TaskID,
+			WorkspaceID:   req.WorkspaceID,
+			RepoURL:       req.URL,
+			WorkDir:       req.WorkDir,
+			AgentName:     req.AgentName,
+			TaskID:        req.TaskID,
+			BaseBranch:    req.BaseBranch,
+			ReuseWorktree: req.ReuseWorktree,
 		})
 		if err != nil {
 			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		// Apply sparse-checkout patterns if requested. This is done after
+		// worktree creation so the tree is in a valid state before scoping.
+		if len(req.SparsePaths) > 0 {
+			if err := applySparseCheckout(result.Path, req.SparsePaths); err != nil {
+				d.logger.Warn("sparse-checkout failed (non-fatal, full checkout used)", "path", result.Path, "error", err)
+				// Non-fatal: the agent gets a full checkout rather than a scoped one.
+			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -164,3 +179,25 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	}
 }
 
+// applySparseCheckout enables cone-mode sparse-checkout in a worktree and
+// limits the working tree to the given path patterns.
+//
+// It runs:
+//
+//	git -C <path> sparse-checkout init --cone
+//	git -C <path> sparse-checkout set <patterns...>
+//
+// This is a best-effort operation — if it fails the worktree falls back to a
+// full checkout and the caller logs a warning.
+func applySparseCheckout(worktreePath string, patterns []string) error {
+	initCmd := exec.Command("git", "-C", worktreePath, "sparse-checkout", "init", "--cone")
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("sparse-checkout init: %s: %w", string(out), err)
+	}
+	setArgs := append([]string{"-C", worktreePath, "sparse-checkout", "set"}, patterns...)
+	setCmd := exec.Command("git", setArgs...)
+	if out, err := setCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("sparse-checkout set: %s: %w", string(out), err)
+	}
+	return nil
+}

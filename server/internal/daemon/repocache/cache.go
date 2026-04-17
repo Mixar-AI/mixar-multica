@@ -335,11 +335,13 @@ func setFetchRefspec(barePath, refspec string) error {
 
 // WorktreeParams holds inputs for creating a worktree from a cached bare clone.
 type WorktreeParams struct {
-	WorkspaceID string // workspace that owns the repo
-	RepoURL     string // remote URL to look up in the cache
-	WorkDir     string // parent directory for the worktree (e.g. task workdir)
-	AgentName   string // for branch naming
-	TaskID      string // for branch naming uniqueness
+	WorkspaceID   string // workspace that owns the repo
+	RepoURL       string // remote URL to look up in the cache
+	WorkDir       string // parent directory for the worktree (e.g. task workdir)
+	AgentName     string // for branch naming
+	TaskID        string // for branch naming uniqueness
+	BaseBranch    string // optional: override the default branch (e.g. "feat/my-feature")
+	ReuseWorktree bool   // if true and worktree already exists, reuse as-is without resetting to base branch
 }
 
 // WorktreeResult describes a successfully created worktree.
@@ -379,15 +381,36 @@ func (c *Cache) CreateWorktree(ctx context.Context, params WorktreeParams) (*Wor
 		)
 	}
 
-	// Determine the default branch to base the worktree on. getRemoteDefaultBranch
-	// walks origin/HEAD → origin/main, origin/master → bare-HEAD hint into
-	// origin/<same> → single-entry scan of origin/* → bare HEAD (only if
-	// origin/* is empty). Reaching "" here means the cache is in a state we
-	// refuse to guess from (no origin/HEAD, no main/master, bare HEAD doesn't
-	// match any origin/* entry, and origin/* has multiple candidates).
-	baseRef := getRemoteDefaultBranch(barePath)
-	if baseRef == "" {
-		return nil, fmt.Errorf("cannot resolve default branch for %s: bare cache at %s has no usable refs (origin/* is empty or ambiguous and bare HEAD has no match). The cache may be corrupted; delete it and retry", params.RepoURL, barePath)
+	// Determine the base ref. If the caller supplied an explicit BaseBranch
+	// (e.g. "feat/my-feature"), resolve it to a remote-tracking ref. Otherwise
+	// fall back to the repo's remote default branch.
+	var baseRef string
+	if params.BaseBranch != "" {
+		// Try "refs/remotes/origin/<branch>" first (modern layout), then
+		// bare refs/heads/<branch> as a fallback for partially-migrated caches.
+		candidate := "refs/remotes/origin/" + params.BaseBranch
+		if err := exec.Command("git", "-C", barePath, "rev-parse", "--verify", candidate).Run(); err == nil {
+			baseRef = candidate
+		} else {
+			fallback := "refs/heads/" + params.BaseBranch
+			if err2 := exec.Command("git", "-C", barePath, "rev-parse", "--verify", fallback).Run(); err2 == nil {
+				baseRef = fallback
+			}
+		}
+		if baseRef == "" {
+			return nil, fmt.Errorf("base branch %q not found in cache for %s (tried refs/remotes/origin/%[1]s and refs/heads/%[1]s); ensure the branch exists on the remote", params.BaseBranch, params.RepoURL)
+		}
+	} else {
+		// Determine the default branch to base the worktree on. getRemoteDefaultBranch
+		// walks origin/HEAD → origin/main, origin/master → bare-HEAD hint into
+		// origin/<same> → single-entry scan of origin/* → bare HEAD (only if
+		// origin/* is empty). Reaching "" here means the cache is in a state we
+		// refuse to guess from (no origin/HEAD, no main/master, bare HEAD doesn't
+		// match any origin/* entry, and origin/* has multiple candidates).
+		baseRef = getRemoteDefaultBranch(barePath)
+		if baseRef == "" {
+			return nil, fmt.Errorf("cannot resolve default branch for %s: bare cache at %s has no usable refs (origin/* is empty or ambiguous and bare HEAD has no match). The cache may be corrupted; delete it and retry", params.RepoURL, barePath)
+		}
 	}
 
 	// Build branch name: agent/{sanitized-name}/{short-task-id}
@@ -398,11 +421,24 @@ func (c *Cache) CreateWorktree(ctx context.Context, params WorktreeParams) (*Wor
 	worktreePath := filepath.Join(params.WorkDir, dirName)
 
 	// If worktree already exists (reused environment from a prior task),
-	// update it to the latest remote code instead of creating a new one.
+	// either update it to the latest remote code (default) or reuse it
+	// as-is (when ReuseWorktree is true — the caller explicitly wants to
+	// continue working on the current state without a reset).
 	if isGitWorktree(worktreePath) {
-		actualBranch, err := updateExistingWorktree(worktreePath, branchName, baseRef)
-		if err != nil {
-			return nil, fmt.Errorf("update existing worktree: %w", err)
+		var actualBranch string
+		if params.ReuseWorktree {
+			// Reuse as-is: read the current branch name without modifying the tree.
+			out, err := exec.Command("git", "-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD").Output()
+			if err != nil {
+				return nil, fmt.Errorf("read existing worktree branch: %w", err)
+			}
+			actualBranch = strings.TrimSpace(string(out))
+		} else {
+			var err error
+			actualBranch, err = updateExistingWorktree(worktreePath, branchName, baseRef)
+			if err != nil {
+				return nil, fmt.Errorf("update existing worktree: %w", err)
+			}
 		}
 
 		for _, pattern := range []string{".agent_context", "CLAUDE.md", "AGENTS.md", ".claude", ".config/opencode"} {
@@ -414,6 +450,7 @@ func (c *Cache) CreateWorktree(ctx context.Context, params WorktreeParams) (*Wor
 			"path", worktreePath,
 			"branch", actualBranch,
 			"base", baseRef,
+			"reuse", params.ReuseWorktree,
 		)
 
 		// Task 20: notify server that this worktree is being reused for a new task.

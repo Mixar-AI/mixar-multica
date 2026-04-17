@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -324,12 +325,29 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	reqBody := map[string]string{
-		"url":          repoURL,
-		"workspace_id": workspaceID,
-		"workdir":      workDir,
-		"agent_name":   agentName,
-		"task_id":      taskID,
+	// Forward per-task picker fields injected by the daemon via env vars.
+	type checkoutReqBody struct {
+		URL           string   `json:"url"`
+		WorkspaceID   string   `json:"workspace_id"`
+		WorkDir       string   `json:"workdir"`
+		AgentName     string   `json:"agent_name"`
+		TaskID        string   `json:"task_id"`
+		BaseBranch    string   `json:"base_branch,omitempty"`
+		ReuseWorktree bool     `json:"reuse_worktree,omitempty"`
+		SparsePaths   []string `json:"sparse_paths,omitempty"`
+	}
+
+	reqBody := checkoutReqBody{
+		URL:           repoURL,
+		WorkspaceID:   workspaceID,
+		WorkDir:       workDir,
+		AgentName:     agentName,
+		TaskID:        taskID,
+		BaseBranch:    os.Getenv("MULTICA_BASE_BRANCH"),
+		ReuseWorktree: os.Getenv("MULTICA_REUSE_WORKTREE") == "true",
+	}
+	if raw := os.Getenv("MULTICA_SPARSE_PATHS"); raw != "" {
+		reqBody.SparsePaths = strings.Split(raw, ",")
 	}
 
 	data, err := json.Marshal(reqBody)
