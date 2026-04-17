@@ -427,6 +427,11 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		}
 		d.mu.Unlock()
 
+		if d.repoCache != nil {
+			wtClient := repocache.NewWorktreeClient(d.cfg.ServerBaseURL, d.client.Token(), id, nil)
+			d.repoCache.SetWorktreeClient(id, wtClient)
+		}
+
 		if d.repoCache != nil && len(resp.Repos) > 0 {
 			go d.syncWorkspaceRepos(id, resp.Repos)
 		}

@@ -47,9 +47,11 @@ type Cache struct {
 	// repo. Separate repos are independent and run concurrently.
 	repoLocks sync.Map // barePath -> *sync.Mutex
 
-	// client is the HTTP client for syncing worktree rows to the server.
-	// May be nil for tests; nil means "skip the sync".
-	client *WorktreeClient
+	// clients maps workspace ID → WorktreeClient for syncing worktree rows.
+	// May have no entries; missing entry means "skip sync for that workspace".
+	// Guarded by clientsMu.
+	clientsMu sync.Mutex
+	clients   map[string]*WorktreeClient
 
 	// worktreeIDs maps local worktree path → server-assigned UUID.
 	// Guarded by worktreeIDsMu.
@@ -59,13 +61,31 @@ type Cache struct {
 
 // New creates a new repo cache rooted at the given directory.
 func New(root string, logger *slog.Logger) *Cache {
-	return &Cache{root: root, logger: logger, worktreeIDs: make(map[string]string)}
+	return &Cache{
+		root:        root,
+		logger:      logger,
+		clients:     make(map[string]*WorktreeClient),
+		worktreeIDs: make(map[string]string),
+	}
 }
 
-// SetWorktreeClient wires the HTTP client used to sync worktree state to the server.
-// Called once at daemon startup; nil-safe.
-func (c *Cache) SetWorktreeClient(client *WorktreeClient) {
-	c.client = client
+// SetWorktreeClient wires the HTTP client for a specific workspace.
+// Called once per workspace at daemon startup; nil client removes the entry.
+func (c *Cache) SetWorktreeClient(wsID string, client *WorktreeClient) {
+	c.clientsMu.Lock()
+	defer c.clientsMu.Unlock()
+	if client == nil {
+		delete(c.clients, wsID)
+	} else {
+		c.clients[wsID] = client
+	}
+}
+
+// worktreeClientFor returns the WorktreeClient for a workspace, or nil if not set.
+func (c *Cache) worktreeClientFor(wsID string) *WorktreeClient {
+	c.clientsMu.Lock()
+	defer c.clientsMu.Unlock()
+	return c.clients[wsID]
 }
 
 // recordWorktreeID stores the mapping from a local worktree path to its server-assigned UUID.
@@ -397,11 +417,11 @@ func (c *Cache) CreateWorktree(ctx context.Context, params WorktreeParams) (*Wor
 		)
 
 		// Task 20: notify server that this worktree is being reused for a new task.
-		if c.client != nil {
+		if cl := c.worktreeClientFor(params.WorkspaceID); cl != nil {
 			if serverID, ok := c.lookupWorktreeID(worktreePath); ok {
 				now := time.Now().UTC().Format(time.RFC3339)
 				taskID := params.TaskID
-				_, updateErr := c.client.Update(ctx, serverID, UpdateWorktreeRequest{
+				_, updateErr := cl.Update(ctx, serverID, UpdateWorktreeRequest{
 					LastUsedAt: &now,
 					TaskID:     &taskID,
 				})
@@ -437,10 +457,10 @@ func (c *Cache) CreateWorktree(ctx context.Context, params WorktreeParams) (*Wor
 	)
 
 	// Task 19: sync the new worktree row to the server.
-	if c.client != nil {
+	if cl := c.worktreeClientFor(params.WorkspaceID); cl != nil {
 		headSHA, _ := readHeadSHA(worktreePath)
 		taskID := params.TaskID
-		row, syncErr := c.client.Create(ctx, CreateWorktreeRequest{
+		row, syncErr := cl.Create(ctx, CreateWorktreeRequest{
 			RepositoryURL: params.RepoURL,
 			TaskID:        &taskID,
 			Path:          worktreePath,
@@ -769,9 +789,11 @@ func readHeadSHA(worktreePath string) (string, error) {
 
 // NotifyWorktreeRemoved calls WorktreeClient.Delete for every worktree path
 // that starts with the given prefix (i.e. lives inside a task directory being
-// removed by GC). No-op when the client is nil.
-func (c *Cache) NotifyWorktreeRemoved(ctx context.Context, dirPrefix string) {
-	if c.client == nil {
+// removed by GC). wsID is used to look up the right WorktreeClient. No-op
+// when no client is registered for the workspace.
+func (c *Cache) NotifyWorktreeRemoved(ctx context.Context, wsID, dirPrefix string) {
+	cl := c.worktreeClientFor(wsID)
+	if cl == nil {
 		return
 	}
 	c.worktreeIDsMu.Lock()
@@ -787,7 +809,7 @@ func (c *Cache) NotifyWorktreeRemoved(ctx context.Context, dirPrefix string) {
 	c.worktreeIDsMu.Unlock()
 
 	for _, e := range toDelete {
-		if err := c.client.Delete(ctx, e.id); err != nil {
+		if err := cl.Delete(ctx, e.id); err != nil {
 			c.logger.Warn("worktree delete sync failed", "error", err, "path", e.path, "server_id", e.id)
 		}
 	}
