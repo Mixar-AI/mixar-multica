@@ -236,7 +236,7 @@ func TestCleanTaskDir_RemovesDirectory(t *testing.T) {
 		t.Fatal("task dir should exist before cleanup")
 	}
 
-	d.cleanTaskDir(taskDir)
+	d.cleanTaskDir(context.Background(), "ws1", taskDir)
 
 	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
 		t.Fatal("task dir should be removed after cleanup")

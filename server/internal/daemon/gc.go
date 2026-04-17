@@ -81,6 +81,7 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string) (cleaned, skippe
 		return
 	}
 
+	wsID := filepath.Base(wsDir)
 	for _, entry := range taskEntries {
 		if ctx.Err() != nil {
 			return
@@ -92,10 +93,10 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string) (cleaned, skippe
 		action := d.shouldCleanTaskDir(ctx, taskDir)
 		switch action {
 		case gcActionClean:
-			d.cleanTaskDir(taskDir)
+			d.cleanTaskDir(ctx, wsID, taskDir)
 			cleaned++
 		case gcActionOrphan:
-			d.cleanTaskDir(taskDir)
+			d.cleanTaskDir(ctx, wsID, taskDir)
 			orphaned++
 		default:
 			skipped++
@@ -169,7 +170,14 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 }
 
 // cleanTaskDir removes a task directory and logs the result.
-func (d *Daemon) cleanTaskDir(taskDir string) {
+// wsID is used to look up the right WorktreeClient for server-side cleanup.
+func (d *Daemon) cleanTaskDir(ctx context.Context, wsID, taskDir string) {
+	// Notify repocache so it can soft-delete any worktree rows that live
+	// inside this task directory. Must happen before os.RemoveAll so the
+	// local path is still present for path-prefix matching.
+	if d.repoCache != nil {
+		d.repoCache.NotifyWorktreeRemoved(ctx, wsID, taskDir)
+	}
 	if err := os.RemoveAll(taskDir); err != nil {
 		d.logger.Warn("gc: remove task dir failed", "dir", taskDir, "error", err)
 	} else {
