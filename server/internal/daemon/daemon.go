@@ -1029,6 +1029,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
+	// Point OpenClaw at the Multica-managed config so it streams in
+	// claude-stream-json dialect. If EnsureConfig failed at startup,
+	// OpenclawConfigPath is empty and we leave the env var unset —
+	// OpenClaw falls back to the user's own config (no streaming).
+	if provider == "openclaw" && d.cfg.OpenclawConfigPath != "" {
+		agentEnv["OPENCLAW_CONFIG_PATH"] = d.cfg.OpenclawConfigPath
+	}
 	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
 	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for
 	// Bedrock). These are set per-agent via the agent settings UI.
