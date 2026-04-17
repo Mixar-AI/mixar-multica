@@ -3,6 +3,7 @@
 package repocache
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -45,11 +46,48 @@ type Cache struct {
 	// worktree admin dirs) don't tolerate parallel mutations on the same
 	// repo. Separate repos are independent and run concurrently.
 	repoLocks sync.Map // barePath -> *sync.Mutex
+
+	// client is the HTTP client for syncing worktree rows to the server.
+	// May be nil for tests; nil means "skip the sync".
+	client *WorktreeClient
+
+	// worktreeIDs maps local worktree path → server-assigned UUID.
+	// Guarded by worktreeIDsMu.
+	worktreeIDsMu sync.Mutex
+	worktreeIDs   map[string]string
 }
 
 // New creates a new repo cache rooted at the given directory.
 func New(root string, logger *slog.Logger) *Cache {
-	return &Cache{root: root, logger: logger}
+	return &Cache{root: root, logger: logger, worktreeIDs: make(map[string]string)}
+}
+
+// SetWorktreeClient wires the HTTP client used to sync worktree state to the server.
+// Called once at daemon startup; nil-safe.
+func (c *Cache) SetWorktreeClient(client *WorktreeClient) {
+	c.client = client
+}
+
+// recordWorktreeID stores the mapping from a local worktree path to its server-assigned UUID.
+func (c *Cache) recordWorktreeID(path, id string) {
+	c.worktreeIDsMu.Lock()
+	c.worktreeIDs[path] = id
+	c.worktreeIDsMu.Unlock()
+}
+
+// lookupWorktreeID returns the server-assigned UUID for a local worktree path.
+func (c *Cache) lookupWorktreeID(path string) (string, bool) {
+	c.worktreeIDsMu.Lock()
+	id, ok := c.worktreeIDs[path]
+	c.worktreeIDsMu.Unlock()
+	return id, ok
+}
+
+// forgetWorktreeID removes the mapping for a local worktree path.
+func (c *Cache) forgetWorktreeID(path string) {
+	c.worktreeIDsMu.Lock()
+	delete(c.worktreeIDs, path)
+	c.worktreeIDsMu.Unlock()
 }
 
 // lockForRepo returns the mutex dedicated to the given bare repo path. See
@@ -294,7 +332,7 @@ type WorktreeResult struct {
 // a git worktree in the agent's working directory. If a worktree already exists
 // at the target path (reused environment), it updates the existing worktree to
 // the latest remote default branch instead of failing.
-func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
+func (c *Cache) CreateWorktree(ctx context.Context, params WorktreeParams) (*WorktreeResult, error) {
 	barePath := c.Lookup(params.WorkspaceID, params.RepoURL)
 	if barePath == "" {
 		return nil, fmt.Errorf("repo not found in cache: %s (workspace: %s)", params.RepoURL, params.WorkspaceID)
@@ -358,6 +396,21 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			"base", baseRef,
 		)
 
+		// Task 20: notify server that this worktree is being reused for a new task.
+		if c.client != nil {
+			if serverID, ok := c.lookupWorktreeID(worktreePath); ok {
+				now := time.Now().UTC().Format(time.RFC3339)
+				taskID := params.TaskID
+				_, updateErr := c.client.Update(ctx, serverID, UpdateWorktreeRequest{
+					LastUsedAt: &now,
+					TaskID:     &taskID,
+				})
+				if updateErr != nil {
+					c.logger.Warn("worktree reuse sync failed", "error", updateErr, "path", worktreePath)
+				}
+			}
+		}
+
 		return &WorktreeResult{
 			Path:       worktreePath,
 			BranchName: actualBranch,
@@ -382,6 +435,25 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		"branch", actualBranch,
 		"base", baseRef,
 	)
+
+	// Task 19: sync the new worktree row to the server.
+	if c.client != nil {
+		headSHA, _ := readHeadSHA(worktreePath)
+		taskID := params.TaskID
+		row, syncErr := c.client.Create(ctx, CreateWorktreeRequest{
+			RepositoryURL: params.RepoURL,
+			TaskID:        &taskID,
+			Path:          worktreePath,
+			BranchName:    actualBranch,
+			BaseBranch:    baseRef,
+			HeadSHA:       headSHA,
+		})
+		if syncErr != nil {
+			c.logger.Warn("worktree sync to server failed; worktree exists locally", "error", syncErr, "path", worktreePath)
+		} else {
+			c.recordWorktreeID(worktreePath, row.ID)
+		}
+	}
 
 	return &WorktreeResult{
 		Path:       worktreePath,
@@ -683,4 +755,40 @@ func shortID(uuid string) string {
 		return s[:8]
 	}
 	return s
+}
+
+// readHeadSHA returns the HEAD commit SHA for a git worktree. Returns empty
+// string on any error (e.g. fresh worktree with no commits).
+func readHeadSHA(worktreePath string) (string, error) {
+	out, err := exec.Command("git", "-C", worktreePath, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// NotifyWorktreeRemoved calls WorktreeClient.Delete for every worktree path
+// that starts with the given prefix (i.e. lives inside a task directory being
+// removed by GC). No-op when the client is nil.
+func (c *Cache) NotifyWorktreeRemoved(ctx context.Context, dirPrefix string) {
+	if c.client == nil {
+		return
+	}
+	c.worktreeIDsMu.Lock()
+	var toDelete []struct{ path, id string }
+	for path, id := range c.worktreeIDs {
+		if strings.HasPrefix(path, dirPrefix) {
+			toDelete = append(toDelete, struct{ path, id string }{path, id})
+		}
+	}
+	for _, e := range toDelete {
+		delete(c.worktreeIDs, e.path)
+	}
+	c.worktreeIDsMu.Unlock()
+
+	for _, e := range toDelete {
+		if err := c.client.Delete(ctx, e.id); err != nil {
+			c.logger.Warn("worktree delete sync failed", "error", err, "path", e.path, "server_id", e.id)
+		}
+	}
 }

@@ -134,7 +134,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			return
 		}
 
-		result, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
+		result, err := d.repoCache.CreateWorktree(r.Context(), repocache.WorktreeParams{
 			WorkspaceID: req.WorkspaceID,
 			RepoURL:     req.URL,
 			WorkDir:     req.WorkDir,

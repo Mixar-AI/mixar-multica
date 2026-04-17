@@ -1,6 +1,7 @@
 package repocache
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -234,7 +235,7 @@ func TestCreateWorktree(t *testing.T) {
 	}
 
 	workDir := t.TempDir()
-	result, err := cache.CreateWorktree(WorktreeParams{
+	result, err := cache.CreateWorktree(context.Background(), WorktreeParams{
 		WorkspaceID: "ws-1",
 		RepoURL:     sourceRepo,
 		WorkDir:     workDir,
@@ -271,7 +272,7 @@ func TestCreateWorktreeNotCached(t *testing.T) {
 	cacheRoot := t.TempDir()
 	cache := New(cacheRoot, testLogger())
 
-	_, err := cache.CreateWorktree(WorktreeParams{
+	_, err := cache.CreateWorktree(context.Background(), WorktreeParams{
 		WorkspaceID: "ws-1",
 		RepoURL:     "https://github.com/org/nonexistent",
 		WorkDir:     t.TempDir(),
@@ -358,7 +359,7 @@ func TestCreateWorktreeFetchesDespiteAgentBranchOnRemote(t *testing.T) {
 
 	// First worktree creates refs/heads/agent/... inside the bare cache.
 	workDir1 := t.TempDir()
-	result1, err := cache.CreateWorktree(WorktreeParams{
+	result1, err := cache.CreateWorktree(context.Background(), WorktreeParams{
 		WorkspaceID: "ws-1",
 		RepoURL:     sourceRepo,
 		WorkDir:     workDir1,
@@ -391,7 +392,7 @@ func TestCreateWorktreeFetchesDespiteAgentBranchOnRemote(t *testing.T) {
 	// and the worktree would be based on the stale snapshot. Under the modern
 	// refspec this succeeds and the new worktree sees sourceHead.
 	workDir2 := t.TempDir()
-	result2, err := cache.CreateWorktree(WorktreeParams{
+	result2, err := cache.CreateWorktree(context.Background(), WorktreeParams{
 		WorkspaceID: "ws-1",
 		RepoURL:     sourceRepo,
 		WorkDir:     workDir2,
@@ -501,7 +502,7 @@ func TestCreateWorktreePathCollisionDoesNotLeakBranch(t *testing.T) {
 		t.Fatalf("write stray file: %v", err)
 	}
 
-	_, err := cache.CreateWorktree(WorktreeParams{
+	_, err := cache.CreateWorktree(context.Background(), WorktreeParams{
 		WorkspaceID: "ws-1",
 		RepoURL:     sourceRepo,
 		WorkDir:     workDir,
