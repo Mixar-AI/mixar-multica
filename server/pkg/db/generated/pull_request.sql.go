@@ -101,6 +101,50 @@ func (q *Queries) InsertPullRequest(ctx context.Context, arg InsertPullRequestPa
 	return i, err
 }
 
+const listOpenPullRequests = `-- name: ListOpenPullRequests :many
+SELECT id, workspace_id, repository_id, issue_id, task_id, pr_url, pr_number, head_branch, base_branch, state, title, created_by_agent_id, created_at, last_synced_at, merged_at, closed_at FROM pull_request
+WHERE state IN ('draft', 'open')
+ORDER BY last_synced_at ASC
+LIMIT $1
+`
+
+func (q *Queries) ListOpenPullRequests(ctx context.Context, limit int32) ([]PullRequest, error) {
+	rows, err := q.db.Query(ctx, listOpenPullRequests, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PullRequest{}
+	for rows.Next() {
+		var i PullRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RepositoryID,
+			&i.IssueID,
+			&i.TaskID,
+			&i.PrUrl,
+			&i.PrNumber,
+			&i.HeadBranch,
+			&i.BaseBranch,
+			&i.State,
+			&i.Title,
+			&i.CreatedByAgentID,
+			&i.CreatedAt,
+			&i.LastSyncedAt,
+			&i.MergedAt,
+			&i.ClosedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPullRequestsByIssue = `-- name: ListPullRequestsByIssue :many
 SELECT id, workspace_id, repository_id, issue_id, task_id, pr_url, pr_number, head_branch, base_branch, state, title, created_by_agent_id, created_at, last_synced_at, merged_at, closed_at FROM pull_request
 WHERE issue_id = $1
@@ -185,4 +229,53 @@ func (q *Queries) ListPullRequestsByWorkspace(ctx context.Context, workspaceID p
 		return nil, err
 	}
 	return items, nil
+}
+
+const updatePullRequestState = `-- name: UpdatePullRequestState :one
+UPDATE pull_request SET
+    state          = COALESCE($2, state),
+    title          = COALESCE($3, title),
+    merged_at      = COALESCE($4, merged_at),
+    closed_at      = COALESCE($5, closed_at),
+    last_synced_at = NOW()
+WHERE id = $1
+RETURNING id, workspace_id, repository_id, issue_id, task_id, pr_url, pr_number, head_branch, base_branch, state, title, created_by_agent_id, created_at, last_synced_at, merged_at, closed_at
+`
+
+type UpdatePullRequestStateParams struct {
+	ID       pgtype.UUID        `json:"id"`
+	State    pgtype.Text        `json:"state"`
+	Title    pgtype.Text        `json:"title"`
+	MergedAt pgtype.Timestamptz `json:"merged_at"`
+	ClosedAt pgtype.Timestamptz `json:"closed_at"`
+}
+
+func (q *Queries) UpdatePullRequestState(ctx context.Context, arg UpdatePullRequestStateParams) (PullRequest, error) {
+	row := q.db.QueryRow(ctx, updatePullRequestState,
+		arg.ID,
+		arg.State,
+		arg.Title,
+		arg.MergedAt,
+		arg.ClosedAt,
+	)
+	var i PullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RepositoryID,
+		&i.IssueID,
+		&i.TaskID,
+		&i.PrUrl,
+		&i.PrNumber,
+		&i.HeadBranch,
+		&i.BaseBranch,
+		&i.State,
+		&i.Title,
+		&i.CreatedByAgentID,
+		&i.CreatedAt,
+		&i.LastSyncedAt,
+		&i.MergedAt,
+		&i.ClosedAt,
+	)
+	return i, err
 }

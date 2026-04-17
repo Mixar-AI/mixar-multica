@@ -21,3 +21,19 @@ INSERT INTO pull_request (
 ON CONFLICT (repository_id, pr_number) DO UPDATE SET
     last_synced_at = NOW()
 RETURNING *;
+
+-- name: ListOpenPullRequests :many
+SELECT * FROM pull_request
+WHERE state IN ('draft', 'open')
+ORDER BY last_synced_at ASC
+LIMIT $1;
+
+-- name: UpdatePullRequestState :one
+UPDATE pull_request SET
+    state          = COALESCE(sqlc.narg('state'), state),
+    title          = COALESCE(sqlc.narg('title'), title),
+    merged_at      = COALESCE(sqlc.narg('merged_at'), merged_at),
+    closed_at      = COALESCE(sqlc.narg('closed_at'), closed_at),
+    last_synced_at = NOW()
+WHERE id = $1
+RETURNING *;
