@@ -285,6 +285,30 @@ func runRepoWorktrees(cmd *cobra.Command, _ []string) error {
 func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	repoURL := args[0]
 
+	// Ensure the URL is registered in the workspace before attempting checkout.
+	client, clientErr := newAPIClient(cmd)
+	if clientErr == nil {
+		verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer verifyCancel()
+
+		var repos []struct {
+			URL string `json:"url"`
+		}
+		if err := client.GetJSON(verifyCtx, "/api/repositories", &repos); err == nil {
+			registered := false
+			for _, r := range repos {
+				if r.URL == repoURL {
+					registered = true
+					break
+				}
+			}
+			if !registered {
+				return fmt.Errorf("repository %q not registered in workspace; run 'multica repo create --url %s --name <name>' first or add it via workspace settings", repoURL, repoURL)
+			}
+		}
+		// If the server is unreachable, fall through and let the daemon handle errors.
+	}
+
 	daemonPort := os.Getenv("MULTICA_DAEMON_PORT")
 	if daemonPort == "" {
 		return fmt.Errorf("MULTICA_DAEMON_PORT not set (this command is intended to be run by an agent inside a daemon task)")
