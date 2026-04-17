@@ -172,25 +172,12 @@ func workspaceReposVersion(repos []RepoData) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func parseWorkspaceRepos(raw []byte) []RepoData {
-	if len(raw) == 0 {
-		return []RepoData{}
+func reposFromDB(dbRepos []db.Repository) []RepoData {
+	out := make([]RepoData, 0, len(dbRepos))
+	for _, r := range dbRepos {
+		out = append(out, RepoData{URL: r.Url, Description: r.Description})
 	}
-
-	var repos []RepoData
-	if err := json.Unmarshal(raw, &repos); err != nil {
-		return []RepoData{}
-	}
-	return normalizeWorkspaceRepos(repos)
-}
-
-func workspaceReposResponse(workspaceID string, raw []byte) daemonWorkspaceReposResponse {
-	repos := parseWorkspaceRepos(raw)
-	return daemonWorkspaceReposResponse{
-		WorkspaceID:  workspaceID,
-		Repos:        repos,
-		ReposVersion: workspaceReposVersion(repos),
-	}
+	return normalizeWorkspaceRepos(out)
 }
 
 func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
@@ -316,10 +303,17 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"runtimes": resp,
 	})
 
+	dbRepos, err := h.Queries.ListRepositoriesByWorkspace(r.Context(), parseUUID(req.WorkspaceID))
+	if err != nil {
+		slog.Error("list repositories for daemon register", "workspace_id", req.WorkspaceID, "error", err)
+		dbRepos = nil
+	}
+	repoData := reposFromDB(dbRepos)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"runtimes":      resp,
-		"repos":         []RepoData{},
-		"repos_version": workspaceReposVersion(nil),
+		"repos":         repoData,
+		"repos_version": workspaceReposVersion(repoData),
 	})
 }
 
@@ -334,7 +328,17 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, nil))
+	dbRepos, err := h.Queries.ListRepositoriesByWorkspace(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		slog.Error("list repositories for daemon workspace repos", "workspace_id", workspaceID, "error", err)
+		dbRepos = nil
+	}
+	repoData := reposFromDB(dbRepos)
+	writeJSON(w, http.StatusOK, daemonWorkspaceReposResponse{
+		WorkspaceID:  workspaceID,
+		Repos:        repoData,
+		ReposVersion: workspaceReposVersion(repoData),
+	})
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
@@ -484,7 +488,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Include workspace ID so the daemon can associate the task with a workspace.
-	// Repos are now sourced from the repository table (Plan Task 17 wires this).
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
@@ -513,7 +516,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Chat task: populate workspace/session info from the chat_session table.
-	// Repos are now sourced from the repository table (Plan Task 17 wires this).
 	if task.ChatSessionID.Valid {
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
@@ -535,6 +537,17 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+		}
+	}
+
+	// Populate repos from the repository table so the agent knows which
+	// repositories are available for checkout in this workspace.
+	if resp.WorkspaceID != "" {
+		dbRepos, err := h.Queries.ListRepositoriesByWorkspace(r.Context(), parseUUID(resp.WorkspaceID))
+		if err != nil {
+			slog.Warn("list repositories for claim task", "workspace_id", resp.WorkspaceID, "error", err)
+		} else {
+			resp.Repos = reposFromDB(dbRepos)
 		}
 	}
 
