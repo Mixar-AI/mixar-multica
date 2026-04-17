@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,9 +35,25 @@ var repoCreateCmd = &cobra.Command{
 	RunE:  runRepoCreate,
 }
 
+var repoUpdateCmd = &cobra.Command{
+	Use:   "update <id>",
+	Short: "Update repository name / description / default branch",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runRepoUpdate,
+}
+
+var repoDeleteCmd = &cobra.Command{
+	Use:   "delete <id>",
+	Short: "Delete a repository (cascades to worktrees and PRs)",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runRepoDelete,
+}
+
 func init() {
 	repoCmd.AddCommand(repoCheckoutCmd)
 	repoCmd.AddCommand(repoCreateCmd)
+	repoCmd.AddCommand(repoUpdateCmd)
+	repoCmd.AddCommand(repoDeleteCmd)
 
 	// repo create
 	repoCreateCmd.Flags().String("url", "", "Git URL (https or git@); required")
@@ -47,6 +64,12 @@ func init() {
 	repoCreateCmd.Flags().String("output", "text", "Output format: text or json")
 	_ = repoCreateCmd.MarkFlagRequired("url")
 	_ = repoCreateCmd.MarkFlagRequired("name")
+
+	// repo update
+	repoUpdateCmd.Flags().String("name", "", "New name")
+	repoUpdateCmd.Flags().String("description", "", "New description")
+	repoUpdateCmd.Flags().String("default-branch", "", "New default branch")
+	repoUpdateCmd.Flags().String("output", "text", "Output format: text or json")
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +114,75 @@ func runRepoCreate(cmd *cobra.Command, _ []string) error {
 	resultName := strVal(result, "name")
 	branch := strVal(result, "default_branch")
 	fmt.Fprintf(os.Stdout, "Registered %s (%s) — branch %s\n  ID: %s\n", resultName, resultURL, branch, id)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// repo update
+// ---------------------------------------------------------------------------
+
+func runRepoUpdate(cmd *cobra.Command, args []string) error {
+	id := args[0]
+
+	body := map[string]any{}
+	if v, _ := cmd.Flags().GetString("name"); v != "" {
+		body["name"] = v
+	}
+	if v, _ := cmd.Flags().GetString("description"); v != "" {
+		body["description"] = v
+	}
+	if v, _ := cmd.Flags().GetString("default-branch"); v != "" {
+		body["default_branch"] = v
+	}
+	if len(body) == 0 {
+		return errors.New("at least one of --name / --description / --default-branch is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PatchJSON(ctx, "/api/repositories/"+id, body, &result); err != nil {
+		return fmt.Errorf("update repository: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	resultName := strVal(result, "name")
+	resultURL := strVal(result, "url")
+	branch := strVal(result, "default_branch")
+	fmt.Fprintf(os.Stdout, "Updated %s (%s) — branch %s\n  ID: %s\n", resultName, resultURL, branch, id)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// repo delete
+// ---------------------------------------------------------------------------
+
+func runRepoDelete(cmd *cobra.Command, args []string) error {
+	id := args[0]
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := client.DeleteJSON(ctx, "/api/repositories/"+id); err != nil {
+		return fmt.Errorf("delete repository: %w", err)
+	}
+
+	fmt.Fprintf(os.Stdout, "Deleted repository %s\n", id)
 	return nil
 }
 
