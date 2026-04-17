@@ -77,10 +77,11 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 // PickerFields holds the optional per-task repository/branch/worktree/scope
 // overrides supplied by the user via the dispatch dialog.
 type PickerFields struct {
-	RepositoryID  pgtype.UUID // nil UUID means "auto-pick"
-	BaseBranch    pgtype.Text // empty means "use repo default"
-	ReuseWorktree bool
-	SparsePaths   []string
+	RepositoryID     pgtype.UUID // nil UUID means "auto-pick"
+	BaseBranch       pgtype.Text // empty means "use repo default"
+	ReuseWorktree    bool
+	SparsePaths      []string
+	TriggerCommentID pgtype.UUID // optional comment that triggered this task
 }
 
 // EnqueueTaskForIssueWithPicker is like EnqueueTaskForIssue but accepts
@@ -101,14 +102,15 @@ func (s *TaskService) EnqueueTaskForIssueWithPicker(ctx context.Context, issue d
 	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
-		AgentID:       issue.AssigneeID,
-		RuntimeID:     agent.RuntimeID,
-		IssueID:       issue.ID,
-		Priority:      priorityToInt(issue.Priority),
-		RepositoryID:  picker.RepositoryID,
-		BaseBranch:    picker.BaseBranch,
-		ReuseWorktree: picker.ReuseWorktree,
-		SparsePaths:   picker.SparsePaths,
+		AgentID:          issue.AssigneeID,
+		RuntimeID:        agent.RuntimeID,
+		IssueID:          issue.ID,
+		Priority:         priorityToInt(issue.Priority),
+		TriggerCommentID: picker.TriggerCommentID,
+		RepositoryID:     picker.RepositoryID,
+		BaseBranch:       picker.BaseBranch,
+		ReuseWorktree:    picker.ReuseWorktree,
+		SparsePaths:      picker.SparsePaths,
 	})
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
