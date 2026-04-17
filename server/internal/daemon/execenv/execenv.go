@@ -31,7 +31,8 @@ type PrepareParams struct {
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
 	IssueID           string
-	TriggerCommentID  string // comment that triggered this task (empty for on_assign)
+	TriggerCommentID   string // comment that triggered this task (empty for on_assign)
+	TriggerCommentType string // type of the triggering comment (e.g. "review_feedback")
 	AgentID           string // unique ID of the dispatched agent
 	AgentName         string
 	AgentInstructions string // agent identity/persona instructions, injected into CLAUDE.md

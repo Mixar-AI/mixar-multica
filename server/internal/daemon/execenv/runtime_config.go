@@ -119,6 +119,16 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
 		b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first\n")
 		b.WriteString("- Keep responses concise and direct\n\n")
+	} else if ctx.TriggerCommentID != "" && ctx.TriggerCommentType == "review_feedback" {
+		// Review-feedback triggered: address the reviewer's comments in the existing worktree.
+		b.WriteString("**This task was triggered by REVIEW FEEDBACK on a pull request.** A reviewer has left comments that need to be addressed.\n\n")
+		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
+		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the conversation including the review feedback\n", ctx.IssueID)
+		fmt.Fprintf(&b, "3. Find the review feedback comment (ID: `%s`) — it contains the reviewer's feedback\n", ctx.TriggerCommentID)
+		b.WriteString("4. Address the reviewer's feedback in the existing code (you are working in the same worktree as before)\n")
+		b.WriteString("5. Push your changes to the same branch — the PR will update automatically\n")
+		fmt.Fprintf(&b, "6. Reply to the review comment: `multica issue comment add %s --parent %s --content \"...\"`\n", ctx.IssueID, ctx.TriggerCommentID)
+		b.WriteString("7. Do NOT change the issue status — it remains in_review until the reviewer approves\n\n")
 	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")
