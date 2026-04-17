@@ -42,6 +42,8 @@
     "./runtimes/queries": "./runtimes/queries.ts",
     "./runtimes/mutations": "./runtimes/mutations.ts",
     "./runtimes/hooks": "./runtimes/hooks.ts",
+    "./integrations": "./integrations/index.ts",
+    "./integrations/queries": "./integrations/queries.ts",
     "./repositories": "./repositories/index.ts",
     "./repositories/queries": "./repositories/queries.ts",
     "./repositories/mutations": "./repositories/mutations.ts",

@@ -95,6 +95,24 @@ export interface CreateRepositoryInput {
   platform?: string;
 }
 
+// Integration types
+export interface WorkspaceIntegration {
+  id: string;
+  workspace_id: string;
+  platform: string;
+  account_login: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GitHubRepo {
+  full_name: string;
+  clone_url: string;
+  default_branch: string;
+  private: boolean;
+  description: string;
+}
+
 export interface UpdateRepositoryInput {
   name?: string;
   description?: string;
@@ -991,5 +1009,18 @@ export class ApiClient {
   // Pull Requests
   async listIssuePullRequests(_wsId: string, issueId: string): Promise<PullRequest[]> {
     return this.fetch(`/api/issues/${issueId}/pull-requests`);
+  }
+
+  // Integrations
+  async listIntegrations(): Promise<WorkspaceIntegration[]> {
+    return this.fetch("/api/integrations");
+  }
+
+  async getGitHubAuthorizeURL(): Promise<{ authorize_url: string }> {
+    return this.fetch("/api/integrations/github/authorize");
+  }
+
+  async listGitHubRepositories(): Promise<GitHubRepo[]> {
+    return this.fetch("/api/integrations/github/repositories");
   }
 }

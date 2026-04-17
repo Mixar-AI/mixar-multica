@@ -7,6 +7,8 @@ export type {
   DispatchTaskInput,
   Worktree,
   ListWorktreesParams,
+  WorkspaceIntegration,
+  GitHubRepo,
 } from "./client";
 export { repositoriesApi } from "./repositories";
 export { worktreesApi } from "./worktrees";
