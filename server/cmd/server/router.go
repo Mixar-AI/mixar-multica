@@ -151,6 +151,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
 
 		r.Get("/issues/{issueId}/gc-check", h.GetIssueGCCheck)
+
+		r.Post("/worktrees", h.DaemonCreateWorktree)
+		r.Patch("/worktrees/{id}", h.DaemonUpdateWorktree)
+		r.Delete("/worktrees/{id}", h.DaemonDeleteWorktree)
 	})
 
 	// Protected API routes
@@ -255,6 +259,24 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
 				})
+			})
+
+			// Repositories
+			r.Route("/api/repositories", func(r chi.Router) {
+				r.Get("/", h.ListRepositories)
+				r.Post("/", h.CreateRepository)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetRepository)
+					r.Patch("/", h.UpdateRepository)
+					r.Delete("/", h.DeleteRepository)
+					r.Get("/worktrees", h.ListWorktreesByRepository)
+				})
+			})
+
+			// Worktrees
+			r.Route("/api/worktrees", func(r chi.Router) {
+				r.Get("/", h.ListWorktreesByWorkspace)
+				r.Get("/{id}", h.GetWorktree)
 			})
 
 			// Autopilots
