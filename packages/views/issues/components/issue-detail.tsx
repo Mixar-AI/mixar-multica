@@ -17,6 +17,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  Rocket,
   Trash2,
   UserMinus,
   Users,
@@ -91,6 +92,7 @@ import { useCreatePin, useDeletePin } from "@multica/core/pins";
 
 import { ProgressRing } from "./progress-ring";
 import { LinkedPRPanel } from "./linked-pr-panel";
+import { DispatchTaskDialog } from "./dispatch-task-dialog";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -365,6 +367,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const didHighlightRef = useRef<string | null>(null);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
   const [childPickerOpen, setChildPickerOpen] = useState(false);
+  const [dispatchDialogOpen, setDispatchDialogOpen] = useState(false);
 
   // Issue data from TQ — uses detail query, seeded from list cache if available.
   // Only seed when description is present; list API omits it, and ContentEditor
@@ -1290,6 +1293,26 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             {/* Agent live output — sticky inside the Activity section so it
                 stays pinned while scrolling through TaskRunHistory + comments. */}
             <AgentLiveCard issueId={id} />
+
+            {/* Dispatch with picker fields — shown only when an agent is assigned */}
+            {issue.assignee_type === "agent" && issue.assignee_id && (
+              <div className="flex justify-end px-4 pt-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs"
+                  onClick={() => setDispatchDialogOpen(true)}
+                >
+                  <Rocket className="h-3.5 w-3.5" />
+                  Dispatch with options
+                </Button>
+                <DispatchTaskDialog
+                  issueId={id}
+                  open={dispatchDialogOpen}
+                  onOpenChange={setDispatchDialogOpen}
+                />
+              </div>
+            )}
 
             {/* Agent execution history */}
             <div className="mt-3">
