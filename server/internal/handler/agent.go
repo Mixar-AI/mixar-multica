@@ -119,6 +119,12 @@ type AgentTaskResponse struct {
 	TriggerCommentContent string         `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	ChatSessionID         string         `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string         `json:"chat_message,omitempty"`            // user message for chat tasks
+	// Per-task picker fields — set by DispatchTask; zero/nil means "auto-pick".
+	RepositoryID  *string  `json:"repository_id,omitempty"`
+	RepositoryURL string   `json:"repository_url,omitempty"` // resolved URL, sent to daemon
+	BaseBranch    *string  `json:"base_branch,omitempty"`
+	ReuseWorktree bool     `json:"reuse_worktree,omitempty"`
+	SparsePaths   []string `json:"sparse_paths,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -137,21 +143,33 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
 	}
-	return AgentTaskResponse{
-		ID:           uuidToString(t.ID),
-		AgentID:      uuidToString(t.AgentID),
-		RuntimeID:    uuidToString(t.RuntimeID),
-		IssueID:      uuidToString(t.IssueID),
-		Status:       t.Status,
-		Priority:     t.Priority,
-		DispatchedAt: timestampToPtr(t.DispatchedAt),
-		StartedAt:    timestampToPtr(t.StartedAt),
-		CompletedAt:  timestampToPtr(t.CompletedAt),
-		Result:       result,
+	resp := AgentTaskResponse{
+		ID:               uuidToString(t.ID),
+		AgentID:          uuidToString(t.AgentID),
+		RuntimeID:        uuidToString(t.RuntimeID),
+		IssueID:          uuidToString(t.IssueID),
+		Status:           t.Status,
+		Priority:         t.Priority,
+		DispatchedAt:     timestampToPtr(t.DispatchedAt),
+		StartedAt:        timestampToPtr(t.StartedAt),
+		CompletedAt:      timestampToPtr(t.CompletedAt),
+		Result:           result,
 		Error:            textToPtr(t.Error),
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
+		ReuseWorktree:    t.ReuseWorktree,
 	}
+	if t.RepositoryID.Valid {
+		id := uuidToString(t.RepositoryID)
+		resp.RepositoryID = &id
+	}
+	if t.BaseBranch.Valid && t.BaseBranch.String != "" {
+		resp.BaseBranch = &t.BaseBranch.String
+	}
+	if len(t.SparsePaths) > 0 {
+		resp.SparsePaths = t.SparsePaths
+	}
+	return resp
 }
 
 func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {

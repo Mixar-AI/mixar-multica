@@ -36,6 +36,12 @@ type Task struct {
 	TriggerCommentContent string     `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	ChatSessionID         string     `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	ChatMessage           string     `json:"chat_message,omitempty"`            // user message content for chat tasks
+	// Per-task picker fields — zero/nil means "auto-pick".
+	RepositoryID  string   `json:"repository_id,omitempty"`  // explicit repository UUID
+	RepositoryURL string   `json:"repository_url,omitempty"` // resolved URL for RepositoryID
+	BaseBranch    string   `json:"base_branch,omitempty"`    // override base branch
+	ReuseWorktree bool     `json:"reuse_worktree,omitempty"` // reuse existing worktree
+	SparsePaths   []string `json:"sparse_paths,omitempty"`   // sparse-checkout patterns
 }
 
 // AgentData holds agent details returned by the claim endpoint.

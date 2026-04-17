@@ -551,6 +551,16 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Resolve the repository URL from repository_id so the daemon can look up
+	// the bare clone without a separate API call.
+	if task.RepositoryID.Valid {
+		if repo, err := h.Queries.GetRepository(r.Context(), task.RepositoryID); err == nil {
+			resp.RepositoryURL = repo.Url
+		} else {
+			slog.Warn("claim task: failed to resolve repository_id", "repository_id", uuidToString(task.RepositoryID), "error", err)
+		}
+	}
+
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
 }

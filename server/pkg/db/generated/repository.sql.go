@@ -67,6 +67,28 @@ func (q *Queries) DeleteRepositoryInWorkspace(ctx context.Context, arg DeleteRep
 	return result.RowsAffected(), nil
 }
 
+const getRepository = `-- name: GetRepository :one
+SELECT id, workspace_id, url, name, default_branch, description, platform, created_at, updated_at FROM repository
+WHERE id = $1
+`
+
+func (q *Queries) GetRepository(ctx context.Context, id pgtype.UUID) (Repository, error) {
+	row := q.db.QueryRow(ctx, getRepository, id)
+	var i Repository
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Url,
+		&i.Name,
+		&i.DefaultBranch,
+		&i.Description,
+		&i.Platform,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getRepositoryByURL = `-- name: GetRepositoryByURL :one
 SELECT id, workspace_id, url, name, default_branch, description, platform, created_at, updated_at FROM repository
 WHERE workspace_id = $1 AND url = $2

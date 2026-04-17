@@ -3,6 +3,10 @@ SELECT * FROM repository
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
+-- name: GetRepository :one
+SELECT * FROM repository
+WHERE id = $1;
+
 -- name: GetRepositoryByURL :one
 SELECT * FROM repository
 WHERE workspace_id = $1 AND url = $2;
