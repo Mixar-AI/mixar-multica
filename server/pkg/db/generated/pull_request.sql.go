@@ -40,6 +40,67 @@ func (q *Queries) GetPullRequest(ctx context.Context, id pgtype.UUID) (PullReque
 	return i, err
 }
 
+const insertPullRequest = `-- name: InsertPullRequest :one
+INSERT INTO pull_request (
+    workspace_id, repository_id, issue_id, task_id,
+    pr_url, pr_number, head_branch, base_branch,
+    state, title, created_by_agent_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT (repository_id, pr_number) DO UPDATE SET
+    last_synced_at = NOW()
+RETURNING id, workspace_id, repository_id, issue_id, task_id, pr_url, pr_number, head_branch, base_branch, state, title, created_by_agent_id, created_at, last_synced_at, merged_at, closed_at
+`
+
+type InsertPullRequestParams struct {
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	RepositoryID     pgtype.UUID `json:"repository_id"`
+	IssueID          pgtype.UUID `json:"issue_id"`
+	TaskID           pgtype.UUID `json:"task_id"`
+	PrUrl            string      `json:"pr_url"`
+	PrNumber         int32       `json:"pr_number"`
+	HeadBranch       string      `json:"head_branch"`
+	BaseBranch       string      `json:"base_branch"`
+	State            string      `json:"state"`
+	Title            string      `json:"title"`
+	CreatedByAgentID pgtype.UUID `json:"created_by_agent_id"`
+}
+
+func (q *Queries) InsertPullRequest(ctx context.Context, arg InsertPullRequestParams) (PullRequest, error) {
+	row := q.db.QueryRow(ctx, insertPullRequest,
+		arg.WorkspaceID,
+		arg.RepositoryID,
+		arg.IssueID,
+		arg.TaskID,
+		arg.PrUrl,
+		arg.PrNumber,
+		arg.HeadBranch,
+		arg.BaseBranch,
+		arg.State,
+		arg.Title,
+		arg.CreatedByAgentID,
+	)
+	var i PullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RepositoryID,
+		&i.IssueID,
+		&i.TaskID,
+		&i.PrUrl,
+		&i.PrNumber,
+		&i.HeadBranch,
+		&i.BaseBranch,
+		&i.State,
+		&i.Title,
+		&i.CreatedByAgentID,
+		&i.CreatedAt,
+		&i.LastSyncedAt,
+		&i.MergedAt,
+		&i.ClosedAt,
+	)
+	return i, err
+}
+
 const listPullRequestsByIssue = `-- name: ListPullRequestsByIssue :many
 SELECT id, workspace_id, repository_id, issue_id, task_id, pr_url, pr_number, head_branch, base_branch, state, title, created_by_agent_id, created_at, last_synced_at, merged_at, closed_at FROM pull_request
 WHERE issue_id = $1
