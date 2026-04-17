@@ -63,6 +63,7 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  PullRequest,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
@@ -969,5 +970,10 @@ export class ApiClient {
 
   async getWorktree(wsId: string, id: string): Promise<Worktree> {
     return this.fetch(`/api/workspaces/${wsId}/worktrees/${id}`);
+  }
+
+  // Pull Requests
+  async listIssuePullRequests(_wsId: string, issueId: string): Promise<PullRequest[]> {
+    return this.fetch(`/api/issues/${issueId}/pull-requests`);
   }
 }
