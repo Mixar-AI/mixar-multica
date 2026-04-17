@@ -73,6 +73,54 @@ export interface ApiClientOptions {
   onUnauthorized?: () => void;
 }
 
+// Repository types
+export interface Repository {
+  id: string;
+  workspace_id: string;
+  url: string;
+  name: string;
+  default_branch: string;
+  description: string;
+  platform: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateRepositoryInput {
+  url: string;
+  name: string;
+  default_branch?: string;
+  description?: string;
+  platform?: string;
+}
+
+export interface UpdateRepositoryInput {
+  name?: string;
+  description?: string;
+  default_branch?: string;
+}
+
+// Worktree types
+export interface Worktree {
+  id: string;
+  repository_id: string;
+  task_id: string | null;
+  path: string;
+  branch_name: string;
+  base_branch: string;
+  status: string;
+  head_sha: string;
+  sparse_paths: string[] | null;
+  created_at: string;
+  last_used_at: string;
+  deleted_at: string | null;
+}
+
+export interface ListWorktreesParams {
+  repositoryId?: string;
+  includeInactive?: boolean;
+}
+
 export interface LoginResponse {
   token: string;
   user: User;
@@ -879,5 +927,47 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // Repositories
+  async listRepositories(wsId: string): Promise<Repository[]> {
+    return this.fetch(`/api/workspaces/${wsId}/repositories`);
+  }
+
+  async getRepository(wsId: string, id: string): Promise<Repository> {
+    return this.fetch(`/api/workspaces/${wsId}/repositories/${id}`);
+  }
+
+  async createRepository(wsId: string, input: CreateRepositoryInput): Promise<Repository> {
+    return this.fetch(`/api/workspaces/${wsId}/repositories`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async updateRepository(wsId: string, id: string, input: UpdateRepositoryInput): Promise<Repository> {
+    return this.fetch(`/api/workspaces/${wsId}/repositories/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async deleteRepository(wsId: string, id: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/repositories/${id}`, { method: "DELETE" });
+  }
+
+  // Worktrees
+  async listWorktrees(wsId: string, params: ListWorktreesParams = {}): Promise<Worktree[]> {
+    const search = new URLSearchParams();
+    if (params.includeInactive) search.set("include_inactive", "true");
+    const path = params.repositoryId
+      ? `/api/workspaces/${wsId}/repositories/${params.repositoryId}/worktrees`
+      : `/api/workspaces/${wsId}/worktrees`;
+    const suffix = search.toString() ? `?${search}` : "";
+    return this.fetch(`${path}${suffix}`);
+  }
+
+  async getWorktree(wsId: string, id: string): Promise<Worktree> {
+    return this.fetch(`/api/workspaces/${wsId}/worktrees/${id}`);
   }
 }

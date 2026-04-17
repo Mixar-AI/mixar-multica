@@ -1,5 +1,14 @@
 export { ApiClient, ApiError } from "./client";
-export type { ApiClientOptions } from "./client";
+export type {
+  ApiClientOptions,
+  Repository,
+  CreateRepositoryInput,
+  UpdateRepositoryInput,
+  Worktree,
+  ListWorktreesParams,
+} from "./client";
+export { repositoriesApi } from "./repositories";
+export { worktreesApi } from "./worktrees";
 export { WSClient } from "./ws-client";
 
 import type { ApiClient as ApiClientType } from "./client";
