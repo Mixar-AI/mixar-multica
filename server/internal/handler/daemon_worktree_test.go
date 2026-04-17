@@ -74,3 +74,45 @@ func TestDaemonCreateWorktree_UnregisteredURL(t *testing.T) {
 		t.Fatalf("status: got %d, want 404", w.Code)
 	}
 }
+
+func TestDaemonUpdateWorktree_HeadSHA(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	wsID := setupTestWorkspace(t)
+	createRepoForTest(t, wsID, "https://github.com/test/repo.git", "test")
+
+	// Create a worktree first
+	body := map[string]any{
+		"repository_url": "https://github.com/test/repo.git",
+		"path":           "/tmp/wt/upd-abc",
+		"branch_name":    "br",
+		"base_branch":    "main",
+	}
+	w := httptest.NewRecorder()
+	testHandler.DaemonCreateWorktree(w, newDaemonRequest(t, "POST", "/api/daemon/worktrees", body, wsID))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("setup create failed: %d; body=%s", w.Code, w.Body.String())
+	}
+	var created WorktreeResponse
+	json.Unmarshal(w.Body.Bytes(), &created)
+
+	// Now update head_sha
+	patch := map[string]any{"head_sha": "abc1234567"}
+	w2 := httptest.NewRecorder()
+	req := newDaemonRequest(t, "PATCH", "/api/daemon/worktrees/"+created.ID, patch, wsID)
+	req = withURLParam(req, "id", created.ID)
+	testHandler.DaemonUpdateWorktree(w2, req)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", w2.Code, w2.Body.String())
+	}
+	var updated WorktreeResponse
+	if err := json.Unmarshal(w2.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if updated.HeadSHA != "abc1234567" {
+		t.Errorf("HeadSHA: got %q", updated.HeadSHA)
+	}
+}
