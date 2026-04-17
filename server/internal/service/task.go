@@ -74,6 +74,50 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	return task, nil
 }
 
+// PickerFields holds the optional per-task repository/branch/worktree/scope
+// overrides supplied by the user via the dispatch dialog.
+type PickerFields struct {
+	RepositoryID  pgtype.UUID // nil UUID means "auto-pick"
+	BaseBranch    pgtype.Text // empty means "use repo default"
+	ReuseWorktree bool
+	SparsePaths   []string
+}
+
+// EnqueueTaskForIssueWithPicker is like EnqueueTaskForIssue but accepts
+// explicit PickerFields to override the daemon's default worktree behaviour.
+func (s *TaskService) EnqueueTaskForIssueWithPicker(ctx context.Context, issue db.Issue, picker PickerFields) (db.AgentTaskQueue, error) {
+	if !issue.AssigneeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
+	}
+	agent, err := s.Queries.GetAgent(ctx, issue.AssigneeID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+		AgentID:       issue.AssigneeID,
+		RuntimeID:     agent.RuntimeID,
+		IssueID:       issue.ID,
+		Priority:      priorityToInt(issue.Priority),
+		RepositoryID:  picker.RepositoryID,
+		BaseBranch:    picker.BaseBranch,
+		ReuseWorktree: picker.ReuseWorktree,
+		SparsePaths:   picker.SparsePaths,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
+	}
+
+	slog.Info("task enqueued (picker)", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(issue.AssigneeID))
+	return task, nil
+}
+
 // EnqueueTaskForMention creates a queued task for a mentioned agent on an issue.
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.

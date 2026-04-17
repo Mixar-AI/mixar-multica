@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -1221,6 +1222,76 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool
 	}
 
 	return true
+}
+
+// DispatchTaskRequest is the request body for POST /api/issues/{id}/dispatch.
+// All picker fields are optional; omitting them produces the same behaviour as
+// before (daemon auto-picks repository/branch/scope).
+type DispatchTaskRequest struct {
+	RepositoryID  *string  `json:"repository_id,omitempty"`
+	BaseBranch    *string  `json:"base_branch,omitempty"`
+	ReuseWorktree bool     `json:"reuse_worktree,omitempty"`
+	SparsePaths   []string `json:"sparse_paths,omitempty"`
+}
+
+// DispatchTask explicitly enqueues a task for the issue's assigned agent with
+// optional per-task repository/branch/worktree/scope overrides.
+// Route: POST /api/issues/{id}/dispatch
+func (h *Handler) DispatchTask(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	if !h.isAgentAssigneeReady(r.Context(), issue) {
+		writeError(w, http.StatusUnprocessableEntity, "issue is not assigned to an active agent with a runtime")
+		return
+	}
+
+	var req DispatchTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	workspaceID := uuidToString(issue.WorkspaceID)
+
+	var picker service.PickerFields
+	picker.ReuseWorktree = req.ReuseWorktree
+
+	if req.BaseBranch != nil {
+		picker.BaseBranch = pgtype.Text{String: *req.BaseBranch, Valid: true}
+	}
+
+	if len(req.SparsePaths) > 0 {
+		picker.SparsePaths = req.SparsePaths
+	}
+
+	if req.RepositoryID != nil {
+		repoID := parseUUID(*req.RepositoryID)
+		// Validate the repository belongs to this workspace.
+		if _, err := h.Queries.GetRepositoryInWorkspace(r.Context(), db.GetRepositoryInWorkspaceParams{
+			ID:          repoID,
+			WorkspaceID: parseUUID(workspaceID),
+		}); err != nil {
+			writeError(w, http.StatusBadRequest, "repository_id does not belong to this workspace")
+			return
+		}
+		picker.RepositoryID = repoID
+	}
+
+	task, err := h.TaskService.EnqueueTaskForIssueWithPicker(r.Context(), issue, picker)
+	if err != nil {
+		slog.Warn("dispatch task failed", "issue_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to dispatch task: "+err.Error())
+		return
+	}
+
+	slog.Info("task dispatched via picker", "task_id", uuidToString(task.ID), "issue_id", id, "workspace_id", workspaceID)
+	resp := taskToResponse(task)
+	resp.WorkspaceID = workspaceID
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
