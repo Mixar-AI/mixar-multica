@@ -1,11 +1,15 @@
 package execenv
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+//go:embed pr-publisher-skill.md
+var prPublisherSkill string
 
 // InjectRuntimeConfig writes the meta skill content into the runtime-specific
 // config file so the agent discovers its environment through its native mechanism.
@@ -135,6 +139,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("   If no relevant skill applies, the default workflow is: understand the task → do the work → post a comment with results → update issue status.\n")
 		fmt.Fprintf(&b, "5. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
 		fmt.Fprintf(&b, "6. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
+	}
+
+	// PR Publisher skill: only for assignment-triggered tasks with at least one repo.
+	if ctx.TriggerCommentID == "" && ctx.ChatSessionID == "" && len(ctx.Repos) > 0 {
+		b.WriteString("\n")
+		b.WriteString(prPublisherSkill)
+		b.WriteString("\n")
 	}
 
 	if len(ctx.AgentSkills) > 0 {

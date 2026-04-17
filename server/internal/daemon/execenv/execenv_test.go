@@ -1001,3 +1001,77 @@ func TestReadGCMeta_NoFile(t *testing.T) {
 		t.Fatal("expected error for missing file")
 	}
 }
+
+func TestPRPublisherSkill_AssignmentWithRepos(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "test-issue-id",
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/org/repo", Description: "Test repo"},
+		},
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("failed to read CLAUDE.md: %v", err)
+	}
+
+	if !strings.Contains(string(content), "Delivering Your Changes") {
+		t.Error("CLAUDE.md should contain PR Publisher skill for assignment-triggered task with repos")
+	}
+}
+
+func TestPRPublisherSkill_AssignmentWithoutRepos(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "test-issue-id",
+		Repos:   nil,
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("failed to read CLAUDE.md: %v", err)
+	}
+
+	if strings.Contains(string(content), "Delivering Your Changes") {
+		t.Error("CLAUDE.md should NOT contain PR Publisher skill when no repos")
+	}
+}
+
+func TestPRPublisherSkill_CommentTriggered(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:          "test-issue-id",
+		TriggerCommentID: "some-comment-id",
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/org/repo", Description: "Test repo"},
+		},
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("failed to read CLAUDE.md: %v", err)
+	}
+
+	if strings.Contains(string(content), "Delivering Your Changes") {
+		t.Error("CLAUDE.md should NOT contain PR Publisher skill for comment-triggered task")
+	}
+}
