@@ -45,6 +45,8 @@
     "./repositories": "./repositories/index.ts",
     "./repositories/queries": "./repositories/queries.ts",
     "./repositories/mutations": "./repositories/mutations.ts",
+    "./worktrees": "./worktrees/index.ts",
+    "./worktrees/queries": "./worktrees/queries.ts",
     "./projects": "./projects/index.ts",
     "./projects/queries": "./projects/queries.ts",
     "./projects/mutations": "./projects/mutations.ts",
