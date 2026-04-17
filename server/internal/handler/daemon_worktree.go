@@ -172,3 +172,26 @@ func (h *Handler) DaemonUpdateWorktree(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, worktreeToResponse(wt))
 }
+
+// DaemonDeleteWorktree soft-deletes a worktree (sets status='deleted', deleted_at=NOW()).
+// Idempotent — returns 204 even if already deleted.
+// Route: DELETE /daemon/worktrees/:id
+//
+// TODO(security): verify worktree's repository belongs to the requesting workspace.
+// For v1 this is acceptable — daemon-token auth is workspace-scoped and worktree
+// IDs are UUIDs. Sub-project E or a follow-up should add the scope check.
+func (h *Handler) DaemonDeleteWorktree(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseUUIDParam(r, "id")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	if err := h.Queries.SoftDeleteWorktree(r.Context(), id); err != nil {
+		slog.Error("soft-delete worktree", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete worktree")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

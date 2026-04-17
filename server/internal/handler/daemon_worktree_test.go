@@ -116,3 +116,53 @@ func TestDaemonUpdateWorktree_HeadSHA(t *testing.T) {
 		t.Errorf("HeadSHA: got %q", updated.HeadSHA)
 	}
 }
+
+func TestDaemonDeleteWorktree_SoftDelete(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	wsID := setupTestWorkspace(t)
+	createRepoForTest(t, wsID, "https://github.com/test/repo.git", "test")
+
+	body := map[string]any{
+		"repository_url": "https://github.com/test/repo.git",
+		"path":           "/tmp/wt/del",
+		"branch_name":    "br",
+		"base_branch":    "main",
+	}
+	w := httptest.NewRecorder()
+	testHandler.DaemonCreateWorktree(w, newDaemonRequest(t, "POST", "/api/daemon/worktrees", body, wsID))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("setup create failed: %d; body=%s", w.Code, w.Body.String())
+	}
+	var created WorktreeResponse
+	json.Unmarshal(w.Body.Bytes(), &created)
+
+	w2 := httptest.NewRecorder()
+	req := newDaemonRequest(t, "DELETE", "/api/daemon/worktrees/"+created.ID, nil, wsID)
+	req = withURLParam(req, "id", created.ID)
+	testHandler.DaemonDeleteWorktree(w2, req)
+
+	if w2.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d, want 204; body=%s", w2.Code, w2.Body.String())
+	}
+
+	// Verify the row is now deleted-status
+	w3 := httptest.NewRecorder()
+	req3 := newRequest("GET", "/api/workspaces/"+wsID+"/worktrees/"+created.ID, nil)
+	withWorkspace(req3, wsID)
+	req3 = withURLParam(req3, "id", created.ID)
+	testHandler.GetWorktree(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("get after delete: got %d; body=%s", w3.Code, w3.Body.String())
+	}
+	var afterDelete WorktreeResponse
+	json.Unmarshal(w3.Body.Bytes(), &afterDelete)
+	if afterDelete.Status != "deleted" {
+		t.Errorf("status after soft-delete: got %q, want deleted", afterDelete.Status)
+	}
+	if afterDelete.DeletedAt == nil {
+		t.Errorf("DeletedAt should be set after soft-delete")
+	}
+}
