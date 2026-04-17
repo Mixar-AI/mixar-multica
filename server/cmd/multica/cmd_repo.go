@@ -49,11 +49,25 @@ var repoDeleteCmd = &cobra.Command{
 	RunE:  runRepoDelete,
 }
 
+var repoListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List repositories registered in the workspace",
+	RunE:  runRepoList,
+}
+
+var repoWorktreesCmd = &cobra.Command{
+	Use:   "worktrees",
+	Short: "List worktrees in the workspace",
+	RunE:  runRepoWorktrees,
+}
+
 func init() {
 	repoCmd.AddCommand(repoCheckoutCmd)
 	repoCmd.AddCommand(repoCreateCmd)
 	repoCmd.AddCommand(repoUpdateCmd)
 	repoCmd.AddCommand(repoDeleteCmd)
+	repoCmd.AddCommand(repoListCmd)
+	repoCmd.AddCommand(repoWorktreesCmd)
 
 	// repo create
 	repoCreateCmd.Flags().String("url", "", "Git URL (https or git@); required")
@@ -70,6 +84,13 @@ func init() {
 	repoUpdateCmd.Flags().String("description", "", "New description")
 	repoUpdateCmd.Flags().String("default-branch", "", "New default branch")
 	repoUpdateCmd.Flags().String("output", "text", "Output format: text or json")
+
+	// repo list
+	repoListCmd.Flags().String("output", "text", "Output format: text or json")
+
+	// repo worktrees
+	repoWorktreesCmd.Flags().String("repo", "", "Filter by repository ID")
+	repoWorktreesCmd.Flags().Bool("include-inactive", false, "Include inactive/deleted worktrees")
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +205,77 @@ func runRepoDelete(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stdout, "Deleted repository %s\n", id)
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// repo list
+// ---------------------------------------------------------------------------
+
+func runRepoList(cmd *cobra.Command, _ []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var repos []map[string]any
+	if err := client.GetJSON(ctx, "/api/repositories", &repos); err != nil {
+		return fmt.Errorf("list repositories: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, repos)
+	}
+
+	if len(repos) == 0 {
+		fmt.Fprintln(os.Stdout, "(no repositories registered)")
+		return nil
+	}
+	for _, r := range repos {
+		id := strVal(r, "id")
+		name := strVal(r, "name")
+		repoURL := strVal(r, "url")
+		branch := strVal(r, "default_branch")
+		fmt.Fprintf(os.Stdout, "%-40s %s (branch %s)\n  ID: %s\n", name, repoURL, branch, id)
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// repo worktrees
+// ---------------------------------------------------------------------------
+
+func runRepoWorktrees(cmd *cobra.Command, _ []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	repoFilter, _ := cmd.Flags().GetString("repo")
+	includeInactive, _ := cmd.Flags().GetBool("include-inactive")
+
+	var path string
+	if repoFilter != "" {
+		path = "/api/repositories/" + repoFilter + "/worktrees"
+	} else {
+		path = "/api/worktrees"
+	}
+	if includeInactive {
+		path += "?include_inactive=true"
+	}
+
+	var worktrees []map[string]any
+	if err := client.GetJSON(ctx, path, &worktrees); err != nil {
+		return fmt.Errorf("list worktrees: %w", err)
+	}
+
+	return cli.PrintJSON(os.Stdout, worktrees)
 }
 
 // ---------------------------------------------------------------------------
