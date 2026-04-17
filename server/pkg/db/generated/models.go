@@ -462,6 +462,17 @@ type Workspace struct {
 	IssueCounter int32              `json:"issue_counter"`
 }
 
+type WorkspaceIntegration struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Platform     string             `json:"platform"`
+	AccountLogin string             `json:"account_login"`
+	AccessToken  string             `json:"access_token"`
+	Scopes       []string           `json:"scopes"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type WorkspaceInvitation struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
