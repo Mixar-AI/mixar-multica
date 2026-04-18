@@ -45,7 +45,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-// Stub the dialog so we can test the tab in isolation
+// Stub the nested dialog so we can test the tab in isolation
 vi.mock("./repository-dialog", () => ({
   RepositoryDialog: ({
     open,
@@ -67,23 +67,118 @@ vi.mock("./repository-dialog", () => ({
     ) : null,
 }));
 
+// Flatten UI primitives so userEvent can drive them without base-ui's portaling.
+// Button supports both children and the `render` prop pattern used by base-ui
+// triggers (DropdownMenuTrigger render={<Button>…</Button>}).
+
+type ButtonStubProps = {
+  children?: ReactNode;
+  render?: React.ReactElement;
+  onClick?: () => void;
+  disabled?: boolean;
+  "aria-label"?: string;
+  className?: string;
+};
+
+function buttonStub({ children, render: renderProp, ...rest }: ButtonStubProps) {
+  if (renderProp) return renderProp;
+  return (
+    <button type="button" {...rest}>
+      {children}
+    </button>
+  );
+}
+
 vi.mock("@multica/ui/components/ui/button", () => ({
-  Button: ({
+  Button: buttonStub,
+}));
+
+vi.mock("@multica/ui/components/ui/skeleton", () => ({
+  Skeleton: ({ className }: { className?: string }) => (
+    <div data-testid="skeleton" className={className} />
+  ),
+}));
+
+vi.mock("@multica/ui/components/ui/badge", () => ({
+  Badge: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+}));
+
+vi.mock("@multica/ui/components/ui/table", () => {
+  const passthrough = (tag: keyof HTMLElementTagNameMap) =>
+    ({ children, ...rest }: { children?: ReactNode }) => {
+      const El = tag as string;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return <El {...(rest as any)}>{children}</El>;
+    };
+  return {
+    Table: passthrough("table"),
+    TableHeader: passthrough("thead"),
+    TableBody: passthrough("tbody"),
+    TableRow: passthrough("tr"),
+    TableHead: passthrough("th"),
+    TableCell: passthrough("td"),
+  };
+});
+
+vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuTrigger: ({ render }: { render: React.ReactElement }) => render,
+  DropdownMenuContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuItem: ({
+    children,
+    onSelect,
+  }: {
+    children: ReactNode;
+    onSelect?: () => void;
+  }) => (
+    <button type="button" onClick={onSelect}>
+      {children}
+    </button>
+  ),
+  DropdownMenuSeparator: () => <hr />,
+}));
+
+vi.mock("@multica/ui/components/ui/tooltip", () => ({
+  TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ render }: { render: React.ReactElement }) => render,
+  TooltipContent: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+}));
+
+vi.mock("@multica/ui/components/ui/empty", () => ({
+  Empty: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  EmptyHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  EmptyMedia: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  EmptyTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  EmptyDescription: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+}));
+
+vi.mock("@multica/ui/components/ui/alert-dialog", () => ({
+  AlertDialog: ({ open, children }: { open: boolean; children: ReactNode }) =>
+    open ? <div role="alertdialog">{children}</div> : null,
+  AlertDialogContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  AlertDialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  AlertDialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+  AlertDialogDescription: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  AlertDialogFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  AlertDialogCancel: ({ children }: { children: ReactNode }) => (
+    <button type="button">{children}</button>
+  ),
+  AlertDialogAction: ({
     children,
     onClick,
     disabled,
-    className,
-    size: _size,
-    variant: _variant,
   }: {
     children: ReactNode;
-    onClick?: () => void;
+    onClick?: (e: React.MouseEvent) => void;
     disabled?: boolean;
-    className?: string;
-    size?: string;
-    variant?: string;
   }) => (
-    <button type="button" onClick={onClick} disabled={disabled} className={className}>
+    <button
+      type="button"
+      onClick={(e) => onClick?.(e)}
+      disabled={disabled}
+      data-testid="alert-dialog-confirm"
+    >
       {children}
     </button>
   ),
@@ -114,19 +209,18 @@ describe("RepositoriesTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWsId.mockReturnValue("ws-1");
-    // Default: no repos
     mockUseQuery.mockReturnValue({ data: [], isLoading: false });
   });
 
-  it("shows a loading state while fetching", () => {
+  it("shows skeleton placeholders while loading", () => {
     mockUseQuery.mockReturnValue({ data: undefined, isLoading: true });
     render(<RepositoriesTab />);
-    expect(screen.getByText(/loading repositories/i)).toBeInTheDocument();
+    expect(screen.getAllByTestId("skeleton").length).toBeGreaterThan(0);
   });
 
   it("shows the empty state when there are no repositories", () => {
     render(<RepositoriesTab />);
-    expect(screen.getByText(/no repositories registered yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no repositories registered/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /add your first repository/i })).toBeInTheDocument();
   });
 
@@ -161,10 +255,11 @@ describe("RepositoriesTab", () => {
 
     expect(screen.getByText("frontend")).toBeInTheDocument();
     expect(screen.getByText("backend")).toBeInTheDocument();
-    expect(screen.getByText("https://github.com/org/frontend.git")).toBeInTheDocument();
+    // URL appears twice (visible span + tooltip content); just check it's present.
+    expect(screen.getAllByText("https://github.com/org/frontend.git").length).toBeGreaterThan(0);
   });
 
-  it("opens the edit dialog with the correct repo when Edit is clicked", async () => {
+  it("opens the edit dialog with the correct repo when Edit is chosen from the row menu", async () => {
     const user = userEvent.setup();
     const repo = makeRepo({ name: "my-repo" });
     mockUseQuery.mockReturnValue({ data: [repo], isLoading: false });
@@ -177,9 +272,8 @@ describe("RepositoriesTab", () => {
     expect(screen.getByTestId("dialog-mode")).toHaveTextContent("edit");
   });
 
-  it("calls delete mutation and shows success toast when Delete is confirmed", async () => {
+  it("opens confirm dialog, confirms delete, calls mutation and shows success toast", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     mockDeleteMutateAsync.mockResolvedValue(undefined);
 
     const repo = makeRepo({ id: "repo-99", name: "to-delete" });
@@ -187,7 +281,12 @@ describe("RepositoriesTab", () => {
 
     render(<RepositoriesTab />);
 
+    // Click Delete in the row menu — this opens the alert dialog.
     await user.click(screen.getByRole("button", { name: /delete/i }));
+    // The alert dialog now renders with a confirm button.
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("alert-dialog-confirm"));
 
     await waitFor(() => {
       expect(mockDeleteMutateAsync).toHaveBeenCalledWith("repo-99");
@@ -197,7 +296,6 @@ describe("RepositoriesTab", () => {
 
   it("shows error toast when delete fails", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     mockDeleteMutateAsync.mockRejectedValue(new Error("Server error"));
 
     const repo = makeRepo({ id: "repo-99", name: "to-delete" });
@@ -206,23 +304,24 @@ describe("RepositoriesTab", () => {
     render(<RepositoriesTab />);
 
     await user.click(screen.getByRole("button", { name: /delete/i }));
+    await user.click(screen.getByTestId("alert-dialog-confirm"));
 
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith("Server error");
     });
   });
 
-  it("does not call delete mutation when confirm is cancelled", async () => {
+  it("does not call delete mutation until confirm is clicked in the alert dialog", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(false);
 
     const repo = makeRepo({ name: "keep-me" });
     mockUseQuery.mockReturnValue({ data: [repo], isLoading: false });
 
     render(<RepositoriesTab />);
 
+    // Open delete menu — this opens the dialog but does NOT mutate yet.
     await user.click(screen.getByRole("button", { name: /delete/i }));
-
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
     expect(mockDeleteMutateAsync).not.toHaveBeenCalled();
   });
 });
