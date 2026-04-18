@@ -44,38 +44,54 @@ type UpdateRepositoryRequest struct {
 	DefaultBranch *string `json:"default_branch,omitempty"`
 }
 
-// validateRepositoryURL accepts https://host/path or git@host:path.
-// Returns the trimmed canonical form or an error.
-// For https URLs, normalizes by stripping trailing slash and .git suffix
-// to prevent near-duplicate rows from slightly different input forms.
+// validateRepositoryURL accepts any of:
+//   - https://host/path or http://host/path (remote http)
+//   - git@host:owner/repo                   (ssh)
+//   - file:///absolute/path                 (local, file URL form)
+//   - /absolute/path                        (local, raw path — canonicalized to file:///absolute/path)
+//
+// Returns the canonical form or an error. Relative paths are rejected
+// to prevent agents resolving them against the daemon's CWD.
+// For https URLs, strips trailing slash and .git suffix so
+// https://github.com/org/repo and https://github.com/org/repo.git dedupe.
 func validateRepositoryURL(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", errors.New("url is required")
 	}
+	// SSH form: git@host:owner/repo
 	if strings.HasPrefix(raw, "git@") {
-		// SSH format: git@host:owner/repo.git — minimal sanity check
 		if !strings.Contains(raw, ":") {
 			return "", errors.New("invalid ssh url; expected git@host:owner/repo")
 		}
 		return raw, nil
 	}
+	// Raw absolute filesystem path — canonicalize to file:// URL for storage.
+	if strings.HasPrefix(raw, "/") {
+		return "file://" + raw, nil
+	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", errors.New("invalid url")
 	}
-	if u.Scheme != "https" && u.Scheme != "http" {
-		return "", errors.New("url must be https or git@ form")
+	switch u.Scheme {
+	case "file":
+		// file:// URLs must have an absolute path and no host.
+		if u.Path == "" || !strings.HasPrefix(u.Path, "/") {
+			return "", errors.New("file:// url must include an absolute path, e.g. file:///Users/you/repo")
+		}
+		return raw, nil
+	case "https", "http":
+		if u.Host == "" || u.Path == "" || u.Path == "/" {
+			return "", errors.New("url must include host and path")
+		}
+		// Normalize: strip trailing slash and .git to prevent near-duplicate rows.
+		raw = strings.TrimSuffix(raw, "/")
+		raw = strings.TrimSuffix(raw, ".git")
+		return raw, nil
+	default:
+		return "", errors.New("url must be https, http, git@, file://, or an absolute /path")
 	}
-	if u.Host == "" || u.Path == "" || u.Path == "/" {
-		return "", errors.New("url must include host and path")
-	}
-	// Normalize: strip trailing slash and .git to prevent near-duplicate rows.
-	// Per code-review feedback: https://github.com/org/repo and
-	// https://github.com/org/repo.git should be the same repository.
-	raw = strings.TrimSuffix(raw, "/")
-	raw = strings.TrimSuffix(raw, ".git")
-	return raw, nil
 }
 
 func validateRepositoryName(name string) (string, error) {
@@ -89,9 +105,12 @@ func validateRepositoryName(name string) (string, error) {
 	return name, nil
 }
 
-func validatePlatform(platform string) (string, error) {
+// validatePlatform returns the caller's choice of platform, defaulting based
+// on the URL when the caller didn't specify one. This keeps local-path repos
+// (file:// URLs) from being mislabeled as "github".
+func validatePlatform(platform, canonicalURL string) (string, error) {
 	if platform == "" {
-		return "github", nil
+		return inferPlatform(canonicalURL), nil
 	}
 	switch platform {
 	case "github", "gitlab", "other":
@@ -99,6 +118,24 @@ func validatePlatform(platform string) (string, error) {
 	default:
 		return "", errors.New("platform must be one of: github, gitlab, other")
 	}
+}
+
+// inferPlatform picks a reasonable default for an unspecified platform based
+// on the URL form. Local file:// URLs are "other"; github.com URLs are
+// "github"; gitlab hostnames are "gitlab"; everything else falls back to "other".
+func inferPlatform(canonicalURL string) string {
+	if strings.HasPrefix(canonicalURL, "file://") {
+		return "other"
+	}
+	if strings.HasPrefix(canonicalURL, "git@github.com:") ||
+		strings.Contains(canonicalURL, "://github.com/") {
+		return "github"
+	}
+	if strings.HasPrefix(canonicalURL, "git@gitlab.") ||
+		strings.Contains(canonicalURL, "://gitlab.") {
+		return "gitlab"
+	}
+	return "other"
 }
 
 // parseUUIDParam extracts and parses a UUID from a chi URL parameter.
@@ -177,7 +214,7 @@ func (h *Handler) CreateRepository(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	platform, err := validatePlatform(req.Platform)
+	platform, err := validatePlatform(req.Platform, urlStr)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

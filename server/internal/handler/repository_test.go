@@ -348,3 +348,44 @@ func TestDeleteRepository_ReturnsNotFoundForMissingRepo(t *testing.T) {
 		t.Errorf("nonexistent delete should 404; got %d", w.Code)
 	}
 }
+
+func TestValidateRepositoryURL(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"https canonical", "https://github.com/org/repo.git", "https://github.com/org/repo", false},
+		{"https trailing slash", "https://github.com/org/repo/", "https://github.com/org/repo", false},
+		{"https without .git", "https://github.com/org/repo", "https://github.com/org/repo", false},
+		{"http preserved", "http://git.internal/org/repo", "http://git.internal/org/repo", false},
+		{"git ssh", "git@github.com:org/repo.git", "git@github.com:org/repo.git", false},
+		{"file url", "file:///Users/rahul/work/project", "file:///Users/rahul/work/project", false},
+		{"absolute path canonicalizes to file url", "/Users/rahul/work/project", "file:///Users/rahul/work/project", false},
+		{"relative path rejected", "../somerepo", "", true},
+		{"bare name rejected", "myrepo", "", true},
+		{"ftp rejected", "ftp://example.com/foo", "", true},
+		{"empty rejected", "", "", true},
+		{"file url without path rejected", "file://", "", true},
+		{"git@ without colon rejected", "git@github.com", "", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := validateRepositoryURL(c.in)
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
