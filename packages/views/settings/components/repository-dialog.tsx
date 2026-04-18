@@ -120,8 +120,8 @@ export function RepositoryDialog({ wsId, open, onOpenChange, editing }: Props) {
           {!isEdit && (
             <DialogDescription>
               {hasGitHub
-                ? "Pick from your connected GitHub account or paste any git URL."
-                : "Paste a git URL to register the repo. Connect GitHub in Integrations for a picker."}
+                ? "Pick from your connected GitHub account, paste any git URL, or enter an absolute local path (e.g. /Users/you/work/project)."
+                : "Paste a git URL or enter an absolute local path (e.g. /Users/you/work/project). Connect GitHub in Integrations for a picker."}
             </DialogDescription>
           )}
         </DialogHeader>
@@ -186,7 +186,7 @@ export function RepositoryDialog({ wsId, open, onOpenChange, editing }: Props) {
                   id="repo-url"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://github.com/org/repo.git"
+                  placeholder="https://github.com/org/repo.git  or  /Users/you/work/project"
                   required
                   disabled={isEdit || (sourceMode === "github" && selectedRepoFullName !== "")}
                   className="font-mono text-xs"
