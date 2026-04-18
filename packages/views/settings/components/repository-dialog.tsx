@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -13,17 +14,15 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Badge } from "@multica/ui/components/ui/badge";
+import { FolderGit2, GitBranch, Link2, Lock, Search } from "lucide-react";
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@multica/ui/components/ui/select";
-import { useCreateRepository, useUpdateRepository } from "@multica/core/repositories";
+  useCreateRepository,
+  useUpdateRepository,
+} from "@multica/core/repositories";
 import { integrationListOptions, githubReposOptions } from "@multica/core/integrations";
-import type { Repository } from "@multica/core/api/client";
-import type { GitHubRepo } from "@multica/core/api/client";
+import type { GitHubRepo, Repository } from "@multica/core/api/client";
 import { toast } from "sonner";
 
 type SourceMode = "github" | "manual";
@@ -38,29 +37,33 @@ interface Props {
 export function RepositoryDialog({ wsId, open, onOpenChange, editing }: Props) {
   const isEdit = Boolean(editing);
 
-  // Source mode toggle: "github" (picker) or "manual" (paste URL).
   const [sourceMode, setSourceMode] = React.useState<SourceMode>("github");
-
   const [url, setUrl] = React.useState(editing?.url ?? "");
   const [name, setName] = React.useState(editing?.name ?? "");
   const [defaultBranch, setDefaultBranch] = React.useState(editing?.default_branch ?? "main");
   const [description, setDescription] = React.useState(editing?.description ?? "");
   const [submitting, setSubmitting] = React.useState(false);
-
-  // Selected GitHub repo full_name (used to drive auto-fill in picker mode).
   const [selectedRepoFullName, setSelectedRepoFullName] = React.useState<string>("");
+  const [repoFilter, setRepoFilter] = React.useState("");
 
   const createMut = useCreateRepository(wsId);
   const updateMut = useUpdateRepository(wsId, editing?.id ?? "");
 
-  // Load integrations to check if GitHub is connected.
   const { data: integrations = [] } = useQuery(integrationListOptions(wsId));
   const hasGitHub = integrations.some((i) => i.platform === "github");
 
-  // Load GitHub repos when the dialog is open, GitHub is connected, and we're in picker mode.
   const { data: githubRepos = [], isLoading: reposLoading } = useQuery(
     githubReposOptions(wsId, open && hasGitHub && !isEdit),
   );
+
+  const filteredRepos = React.useMemo(() => {
+    const q = repoFilter.trim().toLowerCase();
+    if (!q) return githubRepos;
+    return githubRepos.filter((r: GitHubRepo) =>
+      r.full_name.toLowerCase().includes(q) ||
+      (r.description?.toLowerCase().includes(q) ?? false),
+    );
+  }, [githubRepos, repoFilter]);
 
   React.useEffect(() => {
     if (open) {
@@ -69,18 +72,14 @@ export function RepositoryDialog({ wsId, open, onOpenChange, editing }: Props) {
       setDefaultBranch(editing?.default_branch ?? "main");
       setDescription(editing?.description ?? "");
       setSelectedRepoFullName("");
-      // Default to github picker when integration exists and not editing.
+      setRepoFilter("");
       setSourceMode(hasGitHub && !isEdit ? "github" : "manual");
     }
   }, [open, editing, hasGitHub, isEdit]);
 
-  function handleGitHubRepoSelect(fullName: string | null) {
-    if (!fullName) return;
-    setSelectedRepoFullName(fullName);
-    const repo = githubRepos.find((r: GitHubRepo) => r.full_name === fullName);
-    if (!repo) return;
+  function selectGitHubRepo(repo: GitHubRepo) {
+    setSelectedRepoFullName(repo.full_name);
     setUrl(repo.clone_url);
-    // Derive name from full_name (e.g. "org/repo" → "repo").
     const parts = repo.full_name.split("/");
     setName(parts[parts.length - 1] ?? repo.full_name);
     setDefaultBranch(repo.default_branch || "main");
@@ -106,25 +105,34 @@ export function RepositoryDialog({ wsId, open, onOpenChange, editing }: Props) {
     }
   }
 
-  // Whether to show the URL field (always in edit mode, always in manual mode,
-  // and in github mode after a repo has been selected).
-  const showURLField = isEdit || sourceMode === "manual" || selectedRepoFullName !== "";
+  // Which fields to show beyond the source picker.
+  const showForm = isEdit || sourceMode === "manual" || selectedRepoFullName !== "";
+  const submitDisabled =
+    submitting ||
+    (!isEdit && sourceMode === "github" && selectedRepoFullName === "") ||
+    (showForm && (!url.trim() || !name.trim()));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit repository" : "Add repository"}</DialogTitle>
+          {!isEdit && (
+            <DialogDescription>
+              {hasGitHub
+                ? "Pick from your connected GitHub account or paste any git URL."
+                : "Paste a git URL to register the repo. Connect GitHub in Integrations for a picker."}
+            </DialogDescription>
+          )}
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Source toggle — only show when adding a new repo and GitHub is connected */}
           {!isEdit && hasGitHub && (
-            <div className="flex items-center gap-1 rounded-md border p-1 w-fit">
+            <div className="inline-flex w-fit rounded-md border p-0.5">
               <Button
                 type="button"
                 size="sm"
-                variant={sourceMode === "github" ? "default" : "ghost"}
-                className="h-6 px-3 text-xs"
+                variant={sourceMode === "github" ? "secondary" : "ghost"}
+                className="h-7 text-xs"
                 onClick={() => {
                   setSourceMode("github");
                   setUrl("");
@@ -134,101 +142,96 @@ export function RepositoryDialog({ wsId, open, onOpenChange, editing }: Props) {
                   setSelectedRepoFullName("");
                 }}
               >
+                <FolderGit2 className="size-3.5" />
                 From GitHub
               </Button>
               <Button
                 type="button"
                 size="sm"
-                variant={sourceMode === "manual" ? "default" : "ghost"}
-                className="h-6 px-3 text-xs"
+                variant={sourceMode === "manual" ? "secondary" : "ghost"}
+                className="h-7 text-xs"
                 onClick={() => {
                   setSourceMode("manual");
                   setSelectedRepoFullName("");
                 }}
               >
+                <Link2 className="size-3.5" />
                 Paste URL
               </Button>
             </div>
           )}
 
-          {/* GitHub picker mode */}
           {!isEdit && sourceMode === "github" && hasGitHub && (
-            <div className="space-y-1.5">
-              <Label>Repository</Label>
-              {reposLoading ? (
-                <div className="text-xs text-muted-foreground py-2">
-                  Loading GitHub repositories...
-                </div>
-              ) : (
-                <Select value={selectedRepoFullName} onValueChange={handleGitHubRepoSelect}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a repository..." />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-64 overflow-y-auto">
-                    {githubRepos.map((repo: GitHubRepo) => (
-                      <SelectItem key={repo.full_name} value={repo.full_name}>
-                        <span className="truncate max-w-xs">{repo.full_name}</span>
-                        {repo.private && (
-                          <span className="ml-2 text-xs text-muted-foreground">private</span>
-                        )}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
+            <GitHubRepoPicker
+              repos={filteredRepos}
+              allReposCount={githubRepos.length}
+              loading={reposLoading}
+              filter={repoFilter}
+              onFilterChange={setRepoFilter}
+              selected={selectedRepoFullName}
+              onSelect={selectGitHubRepo}
+            />
           )}
 
-          {/* URL field — shown in manual mode, edit mode, or after picking */}
-          {showURLField && (
-            <div className="space-y-1.5">
-              <Label htmlFor="repo-url">URL</Label>
-              <Input
-                id="repo-url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://github.com/org/repo.git"
-                required
-                disabled={isEdit || (sourceMode === "github" && selectedRepoFullName !== "")}
-              />
-              {isEdit && (
-                <p className="text-xs text-muted-foreground">URL is immutable after creation.</p>
-              )}
-            </div>
-          )}
-
-          {/* Name, branch, description — always shown once a source is chosen */}
-          {(isEdit || sourceMode === "manual" || selectedRepoFullName !== "") && (
-            <>
+          {showForm && (
+            <div className="space-y-3">
               <div className="space-y-1.5">
-                <Label htmlFor="repo-name">Name</Label>
+                <Label htmlFor="repo-url">
+                  URL
+                  {isEdit && (
+                    <span className="ml-2 text-xs text-muted-foreground">(immutable)</span>
+                  )}
+                </Label>
                 <Input
-                  id="repo-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="frontend"
+                  id="repo-url"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://github.com/org/repo.git"
                   required
+                  disabled={isEdit || (sourceMode === "github" && selectedRepoFullName !== "")}
+                  className="font-mono text-xs"
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="repo-branch">Default branch</Label>
-                <Input
-                  id="repo-branch"
-                  value={defaultBranch}
-                  onChange={(e) => setDefaultBranch(e.target.value)}
-                  placeholder="main"
-                />
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="repo-name">Name</Label>
+                  <Input
+                    id="repo-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="frontend"
+                    required
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="repo-branch">
+                    Default branch{" "}
+                    <GitBranch className="inline size-3 text-muted-foreground" />
+                  </Label>
+                  <Input
+                    id="repo-branch"
+                    value={defaultBranch}
+                    onChange={(e) => setDefaultBranch(e.target.value)}
+                    placeholder="main"
+                  />
+                </div>
               </div>
+
               <div className="space-y-1.5">
-                <Label htmlFor="repo-desc">Description</Label>
+                <Label htmlFor="repo-desc">
+                  Description{" "}
+                  <span className="text-xs text-muted-foreground">(optional)</span>
+                </Label>
                 <Textarea
                   id="repo-desc"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  rows={3}
+                  rows={2}
+                  placeholder="One-line summary for agents and teammates"
                 />
               </div>
-            </>
+            </div>
           )}
 
           <DialogFooter>
@@ -240,15 +243,111 @@ export function RepositoryDialog({ wsId, open, onOpenChange, editing }: Props) {
             >
               Cancel
             </Button>
-            <Button
-              type="submit"
-              disabled={submitting || (sourceMode === "github" && !isEdit && selectedRepoFullName === "" && !isEdit)}
-            >
-              {submitting ? "Saving..." : isEdit ? "Save changes" : "Add repository"}
+            <Button type="submit" disabled={submitDisabled}>
+              {submitting ? "Saving…" : isEdit ? "Save changes" : "Add repository"}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+interface GitHubRepoPickerProps {
+  repos: GitHubRepo[];
+  allReposCount: number;
+  loading: boolean;
+  filter: string;
+  onFilterChange: (value: string) => void;
+  selected: string;
+  onSelect: (repo: GitHubRepo) => void;
+}
+
+function GitHubRepoPicker({
+  repos,
+  allReposCount,
+  loading,
+  filter,
+  onFilterChange,
+  selected,
+  onSelect,
+}: GitHubRepoPickerProps) {
+  if (loading) {
+    return (
+      <div className="space-y-1.5">
+        <Label>Repository</Label>
+        <div className="space-y-2 rounded-md border p-2">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-8 w-full" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (allReposCount === 0) {
+    return (
+      <div className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
+        No repositories accessible from your GitHub account.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <Label>Repository</Label>
+      <div className="rounded-md border">
+        <div className="relative border-b">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={filter}
+            onChange={(e) => onFilterChange(e.target.value)}
+            placeholder={`Search ${allReposCount} repositories…`}
+            className="h-8 border-0 pl-8 text-xs focus-visible:ring-0 focus-visible:ring-offset-0"
+          />
+        </div>
+        <div className="max-h-56 overflow-y-auto">
+          {repos.length === 0 ? (
+            <div className="p-3 text-center text-xs text-muted-foreground">
+              No matches for &ldquo;{filter}&rdquo;
+            </div>
+          ) : (
+            <ul className="divide-y">
+              {repos.map((repo) => (
+                <li key={repo.full_name}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(repo)}
+                    className={`flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-muted focus:bg-muted focus:outline-none ${
+                      selected === repo.full_name ? "bg-muted" : ""
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate font-mono text-xs">{repo.full_name}</span>
+                        {repo.private && (
+                          <Badge variant="outline" className="gap-1 text-[10px] font-normal">
+                            <Lock className="size-2.5" />
+                            private
+                          </Badge>
+                        )}
+                      </div>
+                      {repo.description && (
+                        <p className="truncate text-xs text-muted-foreground">
+                          {repo.description}
+                        </p>
+                      )}
+                    </div>
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                      {repo.default_branch}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
