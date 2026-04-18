@@ -965,45 +965,49 @@ export class ApiClient {
   }
 
   // Repositories
-  async listRepositories(wsId: string): Promise<Repository[]> {
-    return this.fetch(`/api/workspaces/${wsId}/repositories`);
+  // Workspace context flows via the X-Workspace-ID / X-Workspace-Slug header,
+  // same as every other workspace-scoped endpoint in this codebase. wsId is
+  // kept in the method signatures so the query keys can scope by workspace
+  // for cache invalidation on switch.
+  async listRepositories(_wsId: string): Promise<Repository[]> {
+    return this.fetch(`/api/repositories`);
   }
 
-  async getRepository(wsId: string, id: string): Promise<Repository> {
-    return this.fetch(`/api/workspaces/${wsId}/repositories/${id}`);
+  async getRepository(_wsId: string, id: string): Promise<Repository> {
+    return this.fetch(`/api/repositories/${id}`);
   }
 
-  async createRepository(wsId: string, input: CreateRepositoryInput): Promise<Repository> {
-    return this.fetch(`/api/workspaces/${wsId}/repositories`, {
+  async createRepository(_wsId: string, input: CreateRepositoryInput): Promise<Repository> {
+    return this.fetch(`/api/repositories`, {
       method: "POST",
       body: JSON.stringify(input),
     });
   }
 
-  async updateRepository(wsId: string, id: string, input: UpdateRepositoryInput): Promise<Repository> {
-    return this.fetch(`/api/workspaces/${wsId}/repositories/${id}`, {
+  async updateRepository(_wsId: string, id: string, input: UpdateRepositoryInput): Promise<Repository> {
+    return this.fetch(`/api/repositories/${id}`, {
       method: "PATCH",
       body: JSON.stringify(input),
     });
   }
 
-  async deleteRepository(wsId: string, id: string): Promise<void> {
-    await this.fetch(`/api/workspaces/${wsId}/repositories/${id}`, { method: "DELETE" });
+  async deleteRepository(_wsId: string, id: string): Promise<void> {
+    await this.fetch(`/api/repositories/${id}`, { method: "DELETE" });
   }
 
   // Worktrees
-  async listWorktrees(wsId: string, params: ListWorktreesParams = {}): Promise<Worktree[]> {
+  async listWorktrees(_wsId: string, params: ListWorktreesParams = {}): Promise<Worktree[]> {
     const search = new URLSearchParams();
     if (params.includeInactive) search.set("include_inactive", "true");
     const path = params.repositoryId
-      ? `/api/workspaces/${wsId}/repositories/${params.repositoryId}/worktrees`
-      : `/api/workspaces/${wsId}/worktrees`;
+      ? `/api/repositories/${params.repositoryId}/worktrees`
+      : `/api/worktrees`;
     const suffix = search.toString() ? `?${search}` : "";
     return this.fetch(`${path}${suffix}`);
   }
 
-  async getWorktree(wsId: string, id: string): Promise<Worktree> {
-    return this.fetch(`/api/workspaces/${wsId}/worktrees/${id}`);
+  async getWorktree(_wsId: string, id: string): Promise<Worktree> {
+    return this.fetch(`/api/worktrees/${id}`);
   }
 
   // Pull Requests
